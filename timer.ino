@@ -1329,3 +1329,4 @@ void handleApiReset() {
     stopTone();
   }
   server.send(200, "application/json", "{\"status\":\"reset\"}");
+}
