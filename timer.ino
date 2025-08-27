@@ -1154,7 +1154,6 @@ void handleRoot() {
         // Update status
         const statusDiv = document.getElementById('status');
         const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
 
         if(data.is_playing_false_start) {
           let falseStartMsg = 'FALSE START!';
@@ -1167,11 +1166,11 @@ void handleRoot() {
           }
           statusDiv.textContent = falseStartMsg;
           statusDiv.className = 'status false-start';
-          startBtn.disabled = true; stopBtn.disabled = false; stopBtn.disabled = true; stopBtn.disabled = true; stopBtn.disabled = true;
+          startBtn.disabled = true;
         } else if(data.is_playing_audio) {
           statusDiv.textContent = 'Audio Sequence Playing - Keep Feet Pressed!';
           statusDiv.className = 'status playing';
-          startBtn.disabled = true; stopBtn.disabled = true;
+          startBtn.disabled = true; 
         } else if(data.is_timer_running) {
           let runningMsg = 'CLIMB! Timer Running';
           if(data.false_start_occurred) {
@@ -1185,7 +1184,7 @@ void handleRoot() {
           }
           statusDiv.textContent = runningMsg;
           statusDiv.className = 'status running';
-          startBtn.disabled = true; stopBtn.disabled = false;
+          startBtn.disabled = true;
         } else {
           if(data.false_start_occurred) {
             let falseStartMsg = 'False Start Occurred';
@@ -1206,8 +1205,6 @@ void handleRoot() {
             statusDiv.className = 'status stopped';
           }
           startBtn.disabled = !data.ready_to_start;
-          stopBtn.disabled = true;
-          stopBtn.disabled = true;
         }
       };
       ws.onclose = function() { console.log('WebSocket disconnected'); setTimeout(connectWebSocket, 3000); };
