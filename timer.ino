@@ -19,6 +19,14 @@ const char* password = "airforce11";
 #define LEDC_CHANNEL     0
 #define LEDC_RESOLUTION  8
 
+// ================== Function Declarations ==================
+// Interrupt Service Routines must be declared before setup()
+void IRAM_ATTR startButtonISR();
+void IRAM_ATTR stopLeftISR();
+void IRAM_ATTR stopRightISR();
+void IRAM_ATTR footLeftISR();
+void IRAM_ATTR footRightISR();
+
 // Audio sequence timing (all in milliseconds)
 struct AudioStep {
   int frequency;  // 0 = silence
@@ -70,36 +78,52 @@ unsigned long timerStartTime = 0;
 unsigned long currentElapsedTime = 0;
 bool isPlayingAudio = false;
 bool isPlayingFalseStart = false;
-bool startButtonPressed = false;
-bool stopLeftPressed = false;
-bool stopRightPressed = false;
-bool footLeftPressed = false;
-bool footRightPressed = false;
-bool falseStartOccurred = false;
-bool leftFalseStart = false;
-bool rightFalseStart = false;
-bool leftFootValidDuringAudio = true;  // Track if left foot stayed pressed during audio
-bool rightFootValidDuringAudio = true; // Track if right foot stayed pressed during audio
+
+// Sensor states - volatile for interrupt safety
+volatile bool startButtonPressed = false;
+volatile bool stopLeftPressed = false;
+volatile bool stopRightPressed = false;
+volatile bool footLeftPressed = false;
+volatile bool footRightPressed = false;
+volatile bool falseStartOccurred = false;
+volatile bool leftFalseStart = false;
+volatile bool rightFalseStart = false;
+volatile bool leftFootValidDuringAudio = true;  // Track if left foot stayed pressed during audio
+volatile bool rightFootValidDuringAudio = true; // Track if right foot stayed pressed during audio
 bool falseStartAudioPlayed = false;    // Ensure false start audio only plays once
 
 // Track when false starts occur for negative reaction time calculation
-unsigned long leftFalseStartTime = 0;
-unsigned long rightFalseStartTime = 0;
+volatile unsigned long leftFalseStartTime = 0;
+volatile unsigned long rightFalseStartTime = 0;
 
-// Left side timing - changed to signed long for negative reaction times
-long reactionTimeLeft = 0;
-unsigned long completionTimeLeft = 0;
-bool leftFinished = false;
+// Left side timing - volatile for interrupt access
+volatile long reactionTimeLeft = 0;
+volatile unsigned long completionTimeLeft = 0;
+volatile bool leftFinished = false;
 
-// Right side timing - changed to signed long for negative reaction times
-long reactionTimeRight = 0;
-unsigned long completionTimeRight = 0;
-bool rightFinished = false;
+// Right side timing - volatile for interrupt access  
+volatile long reactionTimeRight = 0;
+volatile unsigned long completionTimeRight = 0;
+volatile bool rightFinished = false;
 
-unsigned long audioEndTime = 0;
-unsigned long lastButtonCheck = 0;
+volatile unsigned long audioEndTime = 0;
+
+// Interrupt control variables
+volatile unsigned long lastStartButtonTime = 0;
+volatile unsigned long lastStopLeftTime = 0;
+volatile unsigned long lastStopRightTime = 0;
+volatile unsigned long lastFootLeftTime = 0;
+volatile unsigned long lastFootRightTime = 0;
+const unsigned long INTERRUPT_DEBOUNCE = 50; // 50ms debounce
+
+// Event flags for main loop processing
+volatile bool startButtonFlag = false;
+volatile bool stopLeftFlag = false;
+volatile bool stopRightFlag = false;
+volatile bool footLeftChangeFlag = false;
+volatile bool footRightChangeFlag = false;
+
 unsigned long lastWebSocketUpdate = 0;
-const unsigned long BUTTON_DEBOUNCE = 50;
 const unsigned long WEBSOCKET_UPDATE_INTERVAL = 50; // Update every 50ms
 
 // Non-blocking audio sequence state
@@ -115,6 +139,20 @@ void setup() {
   pinMode(STOP_SENSOR_RIGHT, INPUT_PULLUP);
   pinMode(FOOT_SENSOR_LEFT, INPUT_PULLUP);
   pinMode(FOOT_SENSOR_RIGHT, INPUT_PULLUP);
+  
+  // Read initial sensor states
+  startButtonPressed = !digitalRead(START_BUTTON);
+  stopLeftPressed = !digitalRead(STOP_SENSOR_LEFT);
+  stopRightPressed = !digitalRead(STOP_SENSOR_RIGHT);
+  footLeftPressed = (digitalRead(FOOT_SENSOR_LEFT) == LOW);
+  footRightPressed = (digitalRead(FOOT_SENSOR_RIGHT) == LOW);
+  
+  // Attach interrupts for critical timing sensors
+  attachInterrupt(digitalPinToInterrupt(START_BUTTON), startButtonISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(STOP_SENSOR_LEFT), stopLeftISR, FALLING);  // Trigger on activation
+  attachInterrupt(digitalPinToInterrupt(STOP_SENSOR_RIGHT), stopRightISR, FALLING); // Trigger on activation
+  attachInterrupt(digitalPinToInterrupt(FOOT_SENSOR_LEFT), footLeftISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(FOOT_SENSOR_RIGHT), footRightISR, CHANGE);
   
   // Initialize LEDC for audio - using newer ESP32 Arduino Core functions
   ledcAttach(AUDIO_PIN, 1000, LEDC_RESOLUTION); // Start with 1kHz base frequency
@@ -151,92 +189,152 @@ void setup() {
 void loop() {
   server.handleClient();
   webSocket.loop();
-  checkButtons();
+  processInterruptFlags(); // Process interrupt events in main loop
   updateAudioSequence();
   updateTimer();
   updateWebSocket();
 }
 
-void checkButtons() {
-  if (millis() - lastButtonCheck < BUTTON_DEBOUNCE) return;
-  
-  bool startPressed = !digitalRead(START_BUTTON);
-  bool stopLeftNow = !digitalRead(STOP_SENSOR_LEFT);
-  bool stopRightNow = !digitalRead(STOP_SENSOR_RIGHT);
-  bool footLeftNow = (digitalRead(FOOT_SENSOR_LEFT) == LOW);
-  bool footRightNow = (digitalRead(FOOT_SENSOR_RIGHT) == LOW);
-  
-  // During audio sequence, track if either foot sensor is released (false start)
-  if (isPlayingAudio && !isPlayingFalseStart) {
-    if (!footLeftNow && leftFootValidDuringAudio) {
-      // Left foot released during audio - false start
-      leftFootValidDuringAudio = false;
-      leftFalseStart = true;
-      falseStartOccurred = true;
-      leftFalseStartTime = millis(); // Record when false start occurred
+// ================== Interrupt Service Routines ==================
+void IRAM_ATTR startButtonISR() {
+  unsigned long currentTime = millis();
+  if (currentTime - lastStartButtonTime > INTERRUPT_DEBOUNCE) {
+    bool newState = !digitalRead(START_BUTTON);
+    if (newState && !startButtonPressed) {
+      // Button pressed
+      startButtonPressed = true;
+      startButtonFlag = true;
+    } else if (!newState && startButtonPressed) {
+      // Button released
+      startButtonPressed = false;
     }
-    if (!footRightNow && rightFootValidDuringAudio) {
-      // Right foot released during audio - false start  
-      rightFootValidDuringAudio = false;
-      rightFalseStart = true;
-      falseStartOccurred = true;
-      rightFalseStartTime = millis(); // Record when false start occurred
+    lastStartButtonTime = currentTime;
+  }
+}
+
+void IRAM_ATTR stopLeftISR() {
+  unsigned long currentTime = millis();
+  if (currentTime - lastStopLeftTime > INTERRUPT_DEBOUNCE) {
+    if (!digitalRead(STOP_SENSOR_LEFT)) {
+      // Sensor activated - record completion time immediately for maximum accuracy
+      if (isTimerRunning && !leftFinished) {
+        completionTimeLeft = currentTime - timerStartTime;
+        leftFinished = true;
+        stopLeftFlag = true;
+      }
+      lastStopLeftTime = currentTime;
     }
   }
-  
-  // Handle foot sensor left state changes (for reaction time after audio)
-  if (footLeftNow && !footLeftPressed) {
-    footLeftPressed = true;
-  } else if (!footLeftNow && footLeftPressed) {
-    footLeftPressed = false;
+}
+
+void IRAM_ATTR stopRightISR() {
+  unsigned long currentTime = millis();
+  if (currentTime - lastStopRightTime > INTERRUPT_DEBOUNCE) {
+    if (!digitalRead(STOP_SENSOR_RIGHT)) {
+      // Sensor activated - record completion time immediately for maximum accuracy
+      if (isTimerRunning && !rightFinished) {
+        completionTimeRight = currentTime - timerStartTime;
+        rightFinished = true;
+        stopRightFlag = true;
+      }
+      lastStopRightTime = currentTime;
+    }
+  }
+}
+
+void IRAM_ATTR footLeftISR() {
+  unsigned long currentTime = millis();
+  if (currentTime - lastFootLeftTime > INTERRUPT_DEBOUNCE) {
+    bool newState = (digitalRead(FOOT_SENSOR_LEFT) == LOW);
     
-    // Calculate reaction time whenever foot is released after we have an audioEndTime
-    if (audioEndTime > 0 && reactionTimeLeft == 0 && !leftFalseStart) {
-      // Normal reaction time - foot released after audio ended
-      reactionTimeLeft = millis() - audioEndTime;
-      sendWebSocketUpdate();
+    if (newState && !footLeftPressed) {
+      // Foot pressed
+      footLeftPressed = true;
+      footLeftChangeFlag = true;
+    } else if (!newState && footLeftPressed) {
+      // Foot released - CRITICAL TIMING EVENT
+      footLeftPressed = false;
+      
+      // Handle false start detection immediately in ISR for maximum accuracy
+      if (isPlayingAudio && !isPlayingFalseStart && leftFootValidDuringAudio) {
+        leftFootValidDuringAudio = false;
+        leftFalseStart = true;
+        falseStartOccurred = true;
+        leftFalseStartTime = currentTime;
+      }
+      // Handle normal reaction time calculation immediately in ISR
+      else if (audioEndTime > 0 && reactionTimeLeft == 0 && !leftFalseStart) {
+        reactionTimeLeft = currentTime - audioEndTime;
+      }
+      
+      footLeftChangeFlag = true;
     }
+    lastFootLeftTime = currentTime;
   }
-  
-  // Handle foot sensor right state changes (for reaction time after audio)
-  if (footRightNow && !footRightPressed) {
-    footRightPressed = true;
-  } else if (!footRightNow && footRightPressed) {
-    footRightPressed = false;
+}
+
+void IRAM_ATTR footRightISR() {
+  unsigned long currentTime = millis();
+  if (currentTime - lastFootRightTime > INTERRUPT_DEBOUNCE) {
+    bool newState = (digitalRead(FOOT_SENSOR_RIGHT) == LOW);
     
-    // Calculate reaction time whenever foot is released after we have an audioEndTime
-    if (audioEndTime > 0 && reactionTimeRight == 0 && !rightFalseStart) {
-      // Normal reaction time - foot released after audio ended
-      reactionTimeRight = millis() - audioEndTime;
-      sendWebSocketUpdate();
+    if (newState && !footRightPressed) {
+      // Foot pressed
+      footRightPressed = true;
+      footRightChangeFlag = true;
+    } else if (!newState && footRightPressed) {
+      // Foot released - CRITICAL TIMING EVENT
+      footRightPressed = false;
+      
+      // Handle false start detection immediately in ISR for maximum accuracy
+      if (isPlayingAudio && !isPlayingFalseStart && rightFootValidDuringAudio) {
+        rightFootValidDuringAudio = false;
+        rightFalseStart = true;
+        falseStartOccurred = true;
+        rightFalseStartTime = currentTime;
+      }
+      // Handle normal reaction time calculation immediately in ISR
+      else if (audioEndTime > 0 && reactionTimeRight == 0 && !rightFalseStart) {
+        reactionTimeRight = currentTime - audioEndTime;
+      }
+      
+      footRightChangeFlag = true;
     }
+    lastFootRightTime = currentTime;
   }
-  
-  // Handle start button
-  if (startPressed && !startButtonPressed) {
-    startButtonPressed = true;
+}
+
+// ================== Interrupt Flag Processing ==================
+void processInterruptFlags() {
+  // Process start button events
+  if (startButtonFlag) {
+    startButtonFlag = false;
     handleStartButton();
-  } else if (!startPressed) {
-    startButtonPressed = false;
   }
   
-  // Handle stop sensor left
-  if (stopLeftNow && !stopLeftPressed) {
-    stopLeftPressed = true;
-    handleStopSensor(true); // true for left side
-  } else if (!stopLeftNow) {
-    stopLeftPressed = false;
+  // Process stop sensor events - check if both finished to stop timer
+  if (stopLeftFlag || stopRightFlag) {
+    stopLeftFlag = false;
+    stopRightFlag = false;
+    
+    // Stop timer when both competitors finish (regardless of false starts)
+    if (leftFinished && rightFinished) {
+      stopTimer();
+    }
+    
+    sendWebSocketUpdate(); // Immediate update when stop sensor triggered
   }
   
-  // Handle stop sensor right
-  if (stopRightNow && !stopRightPressed) {
-    stopRightPressed = true;
-    handleStopSensor(false); // false for right side
-  } else if (!stopRightNow) {
-    stopRightPressed = false;
+  // Process foot sensor change events
+  if (footLeftChangeFlag) {
+    footLeftChangeFlag = false;
+    sendWebSocketUpdate(); // Immediate update for foot sensor changes
   }
   
-  lastButtonCheck = millis();
+  if (footRightChangeFlag) {
+    footRightChangeFlag = false;
+    sendWebSocketUpdate(); // Immediate update for foot sensor changes
+  }
 }
 
 void handleStartButton() {
