@@ -816,28 +816,39 @@ void handleRoot() {
         const reactionLeftDiv = document.getElementById('reaction-time-left');
         const reactionRightDiv = document.getElementById('reaction-time-right');
         
-        if(data.reaction_time_left != 0) {
-          reactionLeftDiv.textContent = 'Reaction: ' + data.formatted_reaction_time_left;
-          reactionLeftDiv.style.display = 'block';
-          // NEW: Add special styling for negative reaction times (false starts)
-          if(data.reaction_time_left < 0) {
-            reactionLeftDiv.className = 'reaction-time negative';
+        // Show reaction time if it exists (not 0) OR if audio has ended (ready to show)
+        if(data.reaction_time_left != 0 || (data.elapsed_time > 0 && !data.is_playing_audio)) {
+          if(data.reaction_time_left != 0) {
+            reactionLeftDiv.textContent = 'Reaction: ' + data.formatted_reaction_time_left;
+            // Add special styling for negative reaction times (false starts)
+            if(data.reaction_time_left < 0) {
+              reactionLeftDiv.className = 'reaction-time negative';
+            } else {
+              reactionLeftDiv.className = 'reaction-time';
+            }
           } else {
+            reactionLeftDiv.textContent = 'Reaction: Waiting...';
             reactionLeftDiv.className = 'reaction-time';
           }
+          reactionLeftDiv.style.display = 'block';
         } else {
           reactionLeftDiv.style.display = 'none';
         }
         
-        if(data.reaction_time_right != 0) {
-          reactionRightDiv.textContent = 'Reaction: ' + data.formatted_reaction_time_right;
-          reactionRightDiv.style.display = 'block';
-          // NEW: Add special styling for negative reaction times (false starts)
-          if(data.reaction_time_right < 0) {
-            reactionRightDiv.className = 'reaction-time negative';
+        if(data.reaction_time_right != 0 || (data.elapsed_time > 0 && !data.is_playing_audio)) {
+          if(data.reaction_time_right != 0) {
+            reactionRightDiv.textContent = 'Reaction: ' + data.formatted_reaction_time_right;
+            // Add special styling for negative reaction times (false starts)
+            if(data.reaction_time_right < 0) {
+              reactionRightDiv.className = 'reaction-time negative';
+            } else {
+              reactionRightDiv.className = 'reaction-time';
+            }
           } else {
+            reactionRightDiv.textContent = 'Reaction: Waiting...';
             reactionRightDiv.className = 'reaction-time';
           }
+          reactionRightDiv.style.display = 'block';
         } else {
           reactionRightDiv.style.display = 'none';
         }
