@@ -82,17 +82,17 @@ bool leftFootValidDuringAudio = true;  // Track if left foot stayed pressed duri
 bool rightFootValidDuringAudio = true; // Track if right foot stayed pressed during audio
 bool falseStartAudioPlayed = false;    // Ensure false start audio only plays once
 
-// NEW: Track when false starts occur for negative reaction time calculation
+// Track when false starts occur for negative reaction time calculation
 unsigned long leftFalseStartTime = 0;
 unsigned long rightFalseStartTime = 0;
 
-// Left side timing
-long reactionTimeLeft = 0;  // Changed to signed long to allow negative values
+// Left side timing - changed to signed long for negative reaction times
+long reactionTimeLeft = 0;
 unsigned long completionTimeLeft = 0;
 bool leftFinished = false;
 
-// Right side timing
-long reactionTimeRight = 0;  // Changed to signed long to allow negative values
+// Right side timing - changed to signed long for negative reaction times
+long reactionTimeRight = 0;
 unsigned long completionTimeRight = 0;
 bool rightFinished = false;
 
@@ -173,14 +173,14 @@ void checkButtons() {
       leftFootValidDuringAudio = false;
       leftFalseStart = true;
       falseStartOccurred = true;
-      leftFalseStartTime = millis(); // NEW: Record when false start occurred
+      leftFalseStartTime = millis(); // Record when false start occurred
     }
     if (!footRightNow && rightFootValidDuringAudio) {
       // Right foot released during audio - false start  
       rightFootValidDuringAudio = false;
       rightFalseStart = true;
       falseStartOccurred = true;
-      rightFalseStartTime = millis(); // NEW: Record when false start occurred
+      rightFalseStartTime = millis(); // Record when false start occurred
     }
   }
   
@@ -191,14 +191,9 @@ void checkButtons() {
     footLeftPressed = false;
     
     // Calculate reaction time whenever foot is released after we have an audioEndTime
-    if (audioEndTime > 0 && reactionTimeLeft == 0) {
-      if (leftFalseStart && leftFalseStartTime > 0) {
-        // Already calculated negative reaction time in completeAudioSequence()
-        // Don't recalculate
-      } else {
-        // Normal reaction time - foot released after audio ended
-        reactionTimeLeft = millis() - audioEndTime;
-      }
+    if (audioEndTime > 0 && reactionTimeLeft == 0 && !leftFalseStart) {
+      // Normal reaction time - foot released after audio ended
+      reactionTimeLeft = millis() - audioEndTime;
       sendWebSocketUpdate();
     }
   }
@@ -210,14 +205,9 @@ void checkButtons() {
     footRightPressed = false;
     
     // Calculate reaction time whenever foot is released after we have an audioEndTime
-    if (audioEndTime > 0 && reactionTimeRight == 0) {
-      if (rightFalseStart && rightFalseStartTime > 0) {
-        // Already calculated negative reaction time in completeAudioSequence()
-        // Don't recalculate
-      } else {
-        // Normal reaction time - foot released after audio ended
-        reactionTimeRight = millis() - audioEndTime;
-      }
+    if (audioEndTime > 0 && reactionTimeRight == 0 && !rightFalseStart) {
+      // Normal reaction time - foot released after audio ended
+      reactionTimeRight = millis() - audioEndTime;
       sendWebSocketUpdate();
     }
   }
@@ -258,8 +248,8 @@ void handleStartButton() {
     leftFootValidDuringAudio = true;
     rightFootValidDuringAudio = true;
     falseStartAudioPlayed = false;
-    leftFalseStartTime = 0; // NEW: Reset false start times
-    rightFalseStartTime = 0; // NEW: Reset false start times
+    leftFalseStartTime = 0; // Reset false start times
+    rightFalseStartTime = 0; // Reset false start times
     reactionTimeLeft = 0;
     reactionTimeRight = 0;
     completionTimeLeft = 0;
@@ -372,7 +362,7 @@ void completeAudioSequence() {
   currentAudioStep = 0;
   audioEndTime = millis(); // Record when audio ended
   
-  // NEW: Calculate negative reaction times for false starts
+  // Calculate negative reaction times for false starts
   if (leftFalseStart && leftFalseStartTime > 0) {
     // Calculate how early they started (negative reaction time)
     reactionTimeLeft = (long)leftFalseStartTime - (long)audioEndTime; // This will be negative
@@ -425,8 +415,8 @@ void resetTimer() {
   leftFootValidDuringAudio = true;
   rightFootValidDuringAudio = true;
   falseStartAudioPlayed = false;
-  leftFalseStartTime = 0; // NEW: Reset false start times
-  rightFalseStartTime = 0; // NEW: Reset false start times
+  leftFalseStartTime = 0; // Reset false start times
+  rightFalseStartTime = 0; // Reset false start times
   reactionTimeLeft = 0;
   reactionTimeRight = 0;
   completionTimeLeft = 0;
@@ -471,8 +461,8 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
             leftFootValidDuringAudio = true;
             rightFootValidDuringAudio = true;
             falseStartAudioPlayed = false;
-            leftFalseStartTime = 0; // NEW: Reset false start times
-            rightFalseStartTime = 0; // NEW: Reset false start times
+            leftFalseStartTime = 0; // Reset false start times
+            rightFalseStartTime = 0; // Reset false start times
             reactionTimeLeft = 0;
             reactionTimeRight = 0;
             completionTimeLeft = 0;
@@ -542,14 +532,14 @@ void sendWebSocketUpdate() {
   
   // Left side data (including negative reaction times)
   doc["reaction_time_left"] = reactionTimeLeft;
-  doc["formatted_reaction_time_left"] = formatSignedTime(reactionTimeLeft); // NEW: Use signed time formatter
+  doc["formatted_reaction_time_left"] = formatSignedTime(reactionTimeLeft);
   doc["completion_time_left"] = completionTimeLeft;
   doc["formatted_completion_time_left"] = formatTime(completionTimeLeft);
   doc["left_finished"] = leftFinished;
   
   // Right side data (including negative reaction times)
   doc["reaction_time_right"] = reactionTimeRight;
-  doc["formatted_reaction_time_right"] = formatSignedTime(reactionTimeRight); // NEW: Use signed time formatter
+  doc["formatted_reaction_time_right"] = formatSignedTime(reactionTimeRight);
   doc["completion_time_right"] = completionTimeRight;
   doc["formatted_completion_time_right"] = formatTime(completionTimeRight);
   doc["right_finished"] = rightFinished;
@@ -573,7 +563,7 @@ String formatTime(unsigned long milliseconds) {
   return String(timeStr);
 }
 
-// NEW: Format signed time for reaction times (can be negative for false starts)
+// Format signed time for reaction times (can be negative for false starts)
 String formatSignedTime(long milliseconds) {
   if (milliseconds == 0) {
     return "0:00.000";
@@ -655,8 +645,7 @@ void handleRoot() {
     .running { background: rgba(34,197,94,0.3); }
     .stopped { background: rgba(239,68,68,0.3); }
     .playing { background: rgba(251,191,36,0.3); }
-    .false-start-left { background: rgba(220,38,38,0.4); border: 2px solid #dc2626; }
-    .false-start-right { background: rgba(220,38,38,0.4); border: 2px solid #dc2626; }
+    .false-start { background: rgba(220,38,38,0.4); border: 2px solid #dc2626; }
     .disqualified { 
       opacity: 0.8; 
       background: rgba(220,38,38,0.2) !important;
@@ -752,7 +741,7 @@ void handleRoot() {
         4. Release foot sensor when ready to climb<br>
         5. Hit your stop sensor when you reach the top<br>
         6. Early foot release = FALSE START (negative reaction time)!<br>
-        <strong>NEW:</strong> Both climbers can still finish even if one false starts
+        <strong>Both climbers can still finish even if one false starts</strong>
       </div>
     </div>
   </div>
@@ -863,7 +852,7 @@ void handleRoot() {
         leftPanel.classList.remove('winner', 'disqualified');
         rightPanel.classList.remove('winner', 'disqualified');
         
-        // NEW: Mark false start competitors as disqualified (but still show their completion time)
+        // Mark false start competitors as disqualified (but still show their completion time)
         if(data.left_false_start) {
           leftPanel.classList.add('disqualified');
         }
@@ -897,7 +886,7 @@ void handleRoot() {
           completionRightDiv.style.display = 'none';
         }
         
-        // NEW: Highlight winner only among non-disqualified competitors
+        // Highlight winner only among non-disqualified competitors
         if(!data.left_false_start && !data.right_false_start) {
           // Both competitors valid
           if(data.completion_time_left > 0 && data.completion_time_right > 0) {
@@ -1006,6 +995,8 @@ void handleApiStatus() {
   doc["is_playing_audio"] = isPlayingAudio;
   doc["is_playing_false_start"] = isPlayingFalseStart;
   doc["false_start_occurred"] = falseStartOccurred;
+  doc["left_false_start"] = leftFalseStart;
+  doc["right_false_start"] = rightFalseStart;
   
   // Foot sensor states
   doc["foot_left_pressed"] = footLeftPressed;
@@ -1046,8 +1037,8 @@ void handleApiStart() {
     leftFootValidDuringAudio = true;
     rightFootValidDuringAudio = true;
     falseStartAudioPlayed = false;
-    leftFalseStartTime = 0; // NEW: Reset false start times
-    rightFalseStartTime = 0; // NEW: Reset false start times
+    leftFalseStartTime = 0; // Reset false start times
+    rightFalseStartTime = 0; // Reset false start times
     reactionTimeLeft = 0;
     reactionTimeRight = 0;
     completionTimeLeft = 0;
