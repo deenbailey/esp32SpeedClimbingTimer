@@ -19,6 +19,14 @@ const char* password = "airforce11";
 #define LEDC_CHANNEL     0
 #define LEDC_RESOLUTION  8
 
+// ================== Function Declarations ==================
+// Interrupt Service Routines must be declared before setup()
+void IRAM_ATTR startButtonISR();
+void IRAM_ATTR stopLeftISR();
+void IRAM_ATTR stopRightISR();
+void IRAM_ATTR footLeftISR();
+void IRAM_ATTR footRightISR();
+
 // Audio sequence timing (all in milliseconds)
 struct AudioStep {
   int frequency;  // 0 = silence
