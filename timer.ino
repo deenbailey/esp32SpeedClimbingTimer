@@ -779,7 +779,7 @@ void handleRoot() {
       <div id='status' class='status stopped'>System Ready - Both Climbers Place Feet</div>
       
       <div class='button-group'>
-        <button onclick='toggleMode()' id='modeBtn' class='mode-toggle competition-mode'>Competition Mode</button>
+        <button onclick='toggleMode()' id='modeBtn' class='mode-toggle competition-mode'>🏆 Competition Mode</button>
       </div>
       
       <div class='climber-panel left-panel'>
@@ -877,10 +877,10 @@ void handleRoot() {
         // Update mode button display
         const modeBtn = document.getElementById('modeBtn');
         if(data.single_player_mode) {
-          modeBtn.textContent = 'Single Player Mode';
+          modeBtn.textContent = '👤 Single Player Mode';
           modeBtn.className = 'mode-toggle single-mode';
         } else {
-          modeBtn.textContent = 'Competition Mode';
+          modeBtn.textContent = '🏆 Competition Mode';
           modeBtn.className = 'mode-toggle competition-mode';
         }
         
