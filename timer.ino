@@ -2,6 +2,7 @@
 #include <WebServer.h>
 #include <ArduinoJson.h>
 #include <WebSocketsServer.h>
+#include <FastLED.h>
 
 // ================== Hardware Config ==================
 #define START_BUTTON 27
@@ -10,6 +11,14 @@
 #define FOOT_SENSOR_LEFT 26
 #define FOOT_SENSOR_RIGHT 18
 #define AUDIO_PIN    22
+
+// ================== LED Strip Config ==================
+#define LED_PIN_LEFT 17
+#define LED_PIN_RIGHT 16
+#define NUM_LEDS_PER_STRIP 3
+
+CRGB ledsLeft[NUM_LEDS_PER_STRIP];
+CRGB ledsRight[NUM_LEDS_PER_STRIP];
 
 // ================== WiFi Config ==================
 const char* ssid = "Nacho WiFi";
@@ -107,6 +116,34 @@ const unsigned long WEBSOCKET_UPDATE_INTERVAL = 50; // Update every 50ms
 int currentAudioStep = 0;
 unsigned long audioStepStartTime = 0;
 
+// ================== LED Functions ==================
+void initializeLEDs() {
+  FastLED.addLeds<WS2812B, LED_PIN_LEFT, GRB>(ledsLeft, NUM_LEDS_PER_STRIP);
+  FastLED.addLeds<WS2812B, LED_PIN_RIGHT, GRB>(ledsRight, NUM_LEDS_PER_STRIP);
+  FastLED.setBrightness(128); // Set brightness to 50%
+  
+  // Turn off all LEDs initially
+  fill_solid(ledsLeft, NUM_LEDS_PER_STRIP, CRGB::Black);
+  fill_solid(ledsRight, NUM_LEDS_PER_STRIP, CRGB::Black);
+  FastLED.show();
+}
+
+void setLeftLEDs(CRGB color) {
+  fill_solid(ledsLeft, NUM_LEDS_PER_STRIP, color);
+  FastLED.show();
+}
+
+void setRightLEDs(CRGB color) {
+  fill_solid(ledsRight, NUM_LEDS_PER_STRIP, color);
+  FastLED.show();
+}
+
+void turnOffAllLEDs() {
+  fill_solid(ledsLeft, NUM_LEDS_PER_STRIP, CRGB::Black);
+  fill_solid(ledsRight, NUM_LEDS_PER_STRIP, CRGB::Black);
+  FastLED.show();
+}
+
 void setup() {
   Serial.begin(115200);
   
@@ -116,6 +153,9 @@ void setup() {
   pinMode(STOP_SENSOR_RIGHT, INPUT_PULLUP);
   pinMode(FOOT_SENSOR_LEFT, INPUT_PULLUP);
   pinMode(FOOT_SENSOR_RIGHT, INPUT_PULLUP);
+  
+  // Initialize LED strips
+  initializeLEDs();
   
   // Initialize LEDC for audio - using newer ESP32 Arduino Core functions
   ledcAttach(AUDIO_PIN, 1000, LEDC_RESOLUTION); // Start with 1kHz base frequency
@@ -177,12 +217,14 @@ void checkButtons() {
         leftFalseStart = true;
         falseStartOccurred = true;
         leftFalseStartTime = millis();
+        setLeftLEDs(CRGB::Red); // Turn on red LEDs for left false start
       }
       if (footRightPressed && !footRightNow && rightFootValidDuringAudio) {
         rightFootValidDuringAudio = false;
         rightFalseStart = true;
         falseStartOccurred = true;
         rightFalseStartTime = millis();
+        setRightLEDs(CRGB::Red); // Turn on red LEDs for right false start
       }
     } else {
       // Competition mode: check both sensors
@@ -191,12 +233,14 @@ void checkButtons() {
         leftFalseStart = true;
         falseStartOccurred = true;
         leftFalseStartTime = millis();
+        setLeftLEDs(CRGB::Red); // Turn on red LEDs for left false start
       }
       if (!footRightNow && rightFootValidDuringAudio) {
         rightFootValidDuringAudio = false;
         rightFalseStart = true;
         falseStartOccurred = true;
         rightFalseStartTime = millis();
+        setRightLEDs(CRGB::Red); // Turn on red LEDs for right false start
       }
     }
   }
@@ -451,6 +495,10 @@ void resetTimer() {
   leftFinished = false;
   rightFinished = false;
   audioEndTime = 0;
+  
+  // Turn off all LEDs when reset
+  turnOffAllLEDs();
+  
   sendWebSocketUpdate(); // Immediate update when timer resets
 }
 
@@ -1281,4 +1329,3 @@ void handleApiReset() {
     stopTone();
   }
   server.send(200, "application/json", "{\"status\":\"reset\"}");
-}
