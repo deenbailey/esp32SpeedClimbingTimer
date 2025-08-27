@@ -634,7 +634,7 @@ void handleRoot() {
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Speed Climbing Competition Timer</title>
+  <title>Gravity Worx Speed Timer</title>
   <meta charset="UTF-8">
   <meta name='viewport' content='width=device-width, initial-scale=1'>
   <style>
@@ -841,7 +841,7 @@ void handleRoot() {
 </head>
 <body>
   <div class='container'>
-    <h1>Speed Climbing Competition Timer</h1>
+    <h1>Gravity Worx Speed Timer</h1>
     
     <div class='competition-layout'>
       <div id='status' class='status stopped'>System Ready - Both Climbers Place Feet</div>
@@ -849,7 +849,7 @@ void handleRoot() {
       <div class='climber-panel left-panel'>
         <h2>LEFT CLIMBER</h2>
         <div id='timer-left' class='timer-display'>0:00.000</div>
-        <div id='foot-status-left' class='foot-sensor foot-released'>Foot: Released</div>
+        <div id='foot-status-left' class='foot-sensor foot-released'>Foot Sensor: None</div>
         <div id='reaction-time-left' class='reaction-time' style='display:none'>Reaction: 0:00.000</div>
         <div id='completion-time-left' class='completion-time' style='display:none'>Time: 0:00.000</div>
       </div>
@@ -857,7 +857,7 @@ void handleRoot() {
       <div class='climber-panel right-panel'>
         <h2>RIGHT CLIMBER</h2>
         <div id='timer-right' class='timer-display'>0:00.000</div>
-        <div id='foot-status-right' class='foot-sensor foot-released'>Foot: Released</div>
+        <div id='foot-status-right' class='foot-sensor foot-released'>Foot Sensor: None</div>
         <div id='reaction-time-right' class='reaction-time' style='display:none'>Reaction: 0:00.000</div>
         <div id='completion-time-right' class='completion-time' style='display:none'>Time: 0:00.000</div>
       </div>
@@ -896,26 +896,40 @@ void handleRoot() {
         const leftTimer = document.getElementById('timer-left');
         const rightTimer = document.getElementById('timer-right');
         
-        if(data.left_finished && data.completion_time_left > 0) {
-          leftTimer.textContent = data.formatted_completion_time_left;
-          leftTimer.style.background = 'rgba(34,197,94,0.2)'; // Green background when finished
-        } else if(data.left_false_start) {
-          leftTimer.textContent = 'FALSE START';
-          leftTimer.style.background = 'rgba(220,38,38,0.3)'; // Red background for false start
+        // LEFT TIMER - only update if foot was pressed initially or in competition mode
+        if(!data.single_player_mode || data.left_finished || data.left_false_start || data.reaction_time_left != 0 || (data.is_timer_running && data.foot_left_pressed)) {
+          if(data.left_finished && data.completion_time_left > 0) {
+            leftTimer.textContent = data.formatted_completion_time_left;
+            leftTimer.style.background = 'rgba(34,197,94,0.2)'; // Green background when finished
+          } else if(data.left_false_start) {
+            leftTimer.textContent = 'FALSE START';
+            leftTimer.style.background = 'rgba(220,38,38,0.3)'; // Red background for false start
+          } else {
+            leftTimer.textContent = data.formatted_time;
+            leftTimer.style.background = 'rgba(255,255,255,0.1)'; // Default background
+          }
         } else {
-          leftTimer.textContent = data.formatted_time;
-          leftTimer.style.background = 'rgba(255,255,255,0.1)'; // Default background
+          // In single player mode and left foot not active - show inactive state
+          leftTimer.textContent = '---';
+          leftTimer.style.background = 'rgba(100,100,100,0.2)'; // Gray background for inactive
         }
         
-        if(data.right_finished && data.completion_time_right > 0) {
-          rightTimer.textContent = data.formatted_completion_time_right;
-          rightTimer.style.background = 'rgba(34,197,94,0.2)'; // Green background when finished
-        } else if(data.right_false_start) {
-          rightTimer.textContent = 'FALSE START';
-          rightTimer.style.background = 'rgba(220,38,38,0.3)'; // Red background for false start
+        // RIGHT TIMER - only update if foot was pressed initially or in competition mode
+        if(!data.single_player_mode || data.right_finished || data.right_false_start || data.reaction_time_right != 0 || (data.is_timer_running && data.foot_right_pressed)) {
+          if(data.right_finished && data.completion_time_right > 0) {
+            rightTimer.textContent = data.formatted_completion_time_right;
+            rightTimer.style.background = 'rgba(34,197,94,0.2)'; // Green background when finished
+          } else if(data.right_false_start) {
+            rightTimer.textContent = 'FALSE START';
+            rightTimer.style.background = 'rgba(220,38,38,0.3)'; // Red background for false start
+          } else {
+            rightTimer.textContent = data.formatted_time;
+            rightTimer.style.background = 'rgba(255,255,255,0.1)'; // Default background
+          }
         } else {
-          rightTimer.textContent = data.formatted_time;
-          rightTimer.style.background = 'rgba(255,255,255,0.1)'; // Default background
+          // In single player mode and right foot not active - show inactive state
+          rightTimer.textContent = '---';
+          rightTimer.style.background = 'rgba(100,100,100,0.2)'; // Gray background for inactive
         }
         
         // Update foot sensor status and ready state based on mode
@@ -923,18 +937,18 @@ void handleRoot() {
         const footRightDiv = document.getElementById('foot-status-right');
         
         if(data.foot_left_pressed) {
-          footLeftDiv.textContent = 'Foot: Pressed [OK]';
+          footLeftDiv.textContent = 'Foot Sensor: Pressed';
           footLeftDiv.className = 'foot-sensor foot-pressed';
         } else {
-          footLeftDiv.textContent = 'Foot: Released';
+          footLeftDiv.textContent = 'Foot Sensor: None';
           footLeftDiv.className = 'foot-sensor foot-released';
         }
         
         if(data.foot_right_pressed) {
-          footRightDiv.textContent = 'Foot: Pressed [OK]';
+          footRightDiv.textContent = 'Foot Sensor: Pressed';
           footRightDiv.className = 'foot-sensor foot-pressed';
         } else {
-          footRightDiv.textContent = 'Foot: Released';
+          footRightDiv.textContent = 'Foot Sensor: None';
           footRightDiv.className = 'foot-sensor foot-released';
         }
         
@@ -955,21 +969,21 @@ void handleRoot() {
           instructionsTitle.textContent = 'Single Player Instructions:';
           instructionsText.innerHTML = `
             1. Press and hold ONE foot sensor<br>
-            2. Press Start to begin audio sequence<br>
-            3. Keep foot sensor pressed during entire audio<br>
-            4. Release foot sensor when ready to climb<br>
+            2. Press Start to begin audio countdown<br>
+            3. Keep foot sensor pressed during entire audio countdown<br>
+            4. Start climbing when the tone finishes<br>
             5. Hit your stop sensor when you reach the top<br>
-            6. Early foot release = FALSE START (negative reaction time)!
+            6. Early foot release = FALSE START!
           `;
         } else {
           instructionsTitle.textContent = 'Competition Instructions:';
           instructionsText.innerHTML = `
             1. Both climbers press and hold foot sensors<br>
-            2. Press Start to begin audio sequence<br>
-            3. Keep foot sensors pressed during entire audio<br>
-            4. Release foot sensor when ready to climb<br>
+            2. Press Start to begin audio countdown<br>
+            3. Keep foot sensors pressed during entire audio countdown<br>
+            4. Start climbing when the tone finishes<br>
             5. Hit your stop sensor when you reach the top<br>
-            6. Early foot release = FALSE START (negative reaction time)!<br>
+            6. Early foot release = FALSE START!<br>
             <strong>Both climbers can still finish even if one false starts</strong>
           `;
         }
@@ -979,7 +993,9 @@ void handleRoot() {
         const reactionRightDiv = document.getElementById('reaction-time-right');
         
         // Show reaction time if it exists (not 0) OR if audio has ended (ready to show)
-        if(data.reaction_time_left != 0 || (data.elapsed_time > 0 && !data.is_playing_audio)) {
+        // BUT only for active sensors in single player mode
+        if((!data.single_player_mode || data.left_finished || data.left_false_start || data.reaction_time_left != 0) && 
+           (data.reaction_time_left != 0 || (data.elapsed_time > 0 && !data.is_playing_audio))) {
           if(data.reaction_time_left != 0) {
             reactionLeftDiv.textContent = 'Reaction: ' + data.formatted_reaction_time_left;
             // Add special styling for negative reaction times (false starts)
@@ -997,7 +1013,8 @@ void handleRoot() {
           reactionLeftDiv.style.display = 'none';
         }
         
-        if(data.reaction_time_right != 0 || (data.elapsed_time > 0 && !data.is_playing_audio)) {
+        if((!data.single_player_mode || data.right_finished || data.right_false_start || data.reaction_time_right != 0) && 
+           (data.reaction_time_right != 0 || (data.elapsed_time > 0 && !data.is_playing_audio))) {
           if(data.reaction_time_right != 0) {
             reactionRightDiv.textContent = 'Reaction: ' + data.formatted_reaction_time_right;
             // Add special styling for negative reaction times (false starts)
@@ -1137,7 +1154,7 @@ void handleRoot() {
             statusDiv.textContent = 'Competition Complete!';
             statusDiv.className = 'status stopped';
           } else {
-            statusDiv.textContent = data.ready_to_start ? 'Ready to Start!' : (data.single_player_mode ? 'Waiting for One Foot' : 'Waiting for Both Feet');
+            statusDiv.textContent = data.ready_to_start ? 'Ready to Start!' : (data.single_player_mode ? 'Waiting for One Foot Sensor' : 'Waiting for Both Foot Sensors');
             statusDiv.className = 'status stopped';
           }
           startBtn.disabled = !data.ready_to_start;
