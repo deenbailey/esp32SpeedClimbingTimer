@@ -81,6 +81,7 @@ bool rightFalseStart = false;
 bool leftFootValidDuringAudio = true;  // Track if left foot stayed pressed during audio
 bool rightFootValidDuringAudio = true; // Track if right foot stayed pressed during audio
 bool falseStartAudioPlayed = false;    // Ensure false start audio only plays once
+bool singlePlayerMode = false;         // New: Single player mode toggle
 
 // Track when false starts occur for negative reaction time calculation
 unsigned long leftFalseStartTime = 0;
@@ -167,20 +168,36 @@ void checkButtons() {
   bool footRightNow = (digitalRead(FOOT_SENSOR_RIGHT) == LOW);
   
   // During audio sequence, track if either foot sensor is released (false start)
+  // Only check for false starts on active sensors based on mode
   if (isPlayingAudio && !isPlayingFalseStart) {
-    if (!footLeftNow && leftFootValidDuringAudio) {
-      // Left foot released during audio - false start
-      leftFootValidDuringAudio = false;
-      leftFalseStart = true;
-      falseStartOccurred = true;
-      leftFalseStartTime = millis(); // Record when false start occurred
-    }
-    if (!footRightNow && rightFootValidDuringAudio) {
-      // Right foot released during audio - false start  
-      rightFootValidDuringAudio = false;
-      rightFalseStart = true;
-      falseStartOccurred = true;
-      rightFalseStartTime = millis(); // Record when false start occurred
+    if (singlePlayerMode) {
+      // In single player mode, only check the sensor that was initially pressed
+      if (footLeftPressed && !footLeftNow && leftFootValidDuringAudio) {
+        leftFootValidDuringAudio = false;
+        leftFalseStart = true;
+        falseStartOccurred = true;
+        leftFalseStartTime = millis();
+      }
+      if (footRightPressed && !footRightNow && rightFootValidDuringAudio) {
+        rightFootValidDuringAudio = false;
+        rightFalseStart = true;
+        falseStartOccurred = true;
+        rightFalseStartTime = millis();
+      }
+    } else {
+      // Competition mode: check both sensors
+      if (!footLeftNow && leftFootValidDuringAudio) {
+        leftFootValidDuringAudio = false;
+        leftFalseStart = true;
+        falseStartOccurred = true;
+        leftFalseStartTime = millis();
+      }
+      if (!footRightNow && rightFootValidDuringAudio) {
+        rightFootValidDuringAudio = false;
+        rightFalseStart = true;
+        falseStartOccurred = true;
+        rightFalseStartTime = millis();
+      }
     }
   }
   
@@ -240,8 +257,18 @@ void checkButtons() {
 }
 
 void handleStartButton() {
-  // Only allow start if BOTH foot sensors are pressed and not currently playing audio
-  if (footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart) {
+  // Allow start if conditions are met based on mode
+  bool canStart = false;
+  
+  if (singlePlayerMode) {
+    // Single player: allow if at least one foot sensor is pressed
+    canStart = (footLeftPressed || footRightPressed) && !isPlayingAudio && !isPlayingFalseStart;
+  } else {
+    // Competition mode: require BOTH foot sensors
+    canStart = footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart;
+  }
+  
+  if (canStart) {
     falseStartOccurred = false;
     leftFalseStart = false;
     rightFalseStart = false;
@@ -454,7 +481,17 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
         Serial.printf("WebSocket received: %s\n", command.c_str());
         
         if (command == "start") {
-          if (footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart) {
+          bool canStart = false;
+          
+          if (singlePlayerMode) {
+            // Single player: allow if at least one foot sensor is pressed
+            canStart = (footLeftPressed || footRightPressed) && !isPlayingAudio && !isPlayingFalseStart;
+          } else {
+            // Competition mode: require BOTH foot sensors
+            canStart = footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart;
+          }
+          
+          if (canStart) {
             falseStartOccurred = false;
             leftFalseStart = false;
             rightFalseStart = false;
@@ -487,6 +524,8 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
             currentAudioStep = 0;
             stopTone();
           }
+        } else if (command == "toggle_mode") {
+          singlePlayerMode = !singlePlayerMode;
         }
         sendWebSocketUpdate(); // Send immediate update after command
       }
@@ -520,11 +559,13 @@ void sendWebSocketUpdate() {
   doc["false_start_occurred"] = falseStartOccurred;
   doc["left_false_start"] = leftFalseStart;
   doc["right_false_start"] = rightFalseStart;
+  doc["single_player_mode"] = singlePlayerMode;
   
   // Foot sensor states
   doc["foot_left_pressed"] = footLeftPressed;
   doc["foot_right_pressed"] = footRightPressed;
   doc["both_feet_ready"] = footLeftPressed && footRightPressed;
+  doc["ready_to_start"] = singlePlayerMode ? (footLeftPressed || footRightPressed) : (footLeftPressed && footRightPressed);
   
   // Timing data
   doc["elapsed_time"] = currentElapsedTime;
@@ -692,6 +733,32 @@ void handleRoot() {
     button:hover { background: rgba(255,255,255,0.3); transform: translateY(-2px); }
     button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
     .button-group { text-align: center; margin: 20px 0; grid-column: 1 / -1; }
+    .mode-toggle {
+      background: rgba(255,255,255,0.15);
+      border: 2px solid rgba(255,255,255,0.4);
+      padding: 12px 20px;
+      border-radius: 25px;
+      font-size: 14px;
+      font-weight: bold;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s ease;
+      margin: 10px;
+    }
+    .mode-toggle.single-mode {
+      background: linear-gradient(45deg, #ff6b6b, #ff8e8e);
+      border-color: #ff4757;
+      box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+    }
+    .mode-toggle.competition-mode {
+      background: linear-gradient(45deg, #4CAF50, #66BB6A);
+      border-color: #45A049;
+      box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+    }
+    .mode-toggle:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(255,255,255,0.3);
+    }
     h1 { text-align: center; margin-bottom: 30px; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
     h2 { margin-top: 0; }
     .instructions { 
@@ -706,10 +773,14 @@ void handleRoot() {
 </head>
 <body>
   <div class='container'>
-    <h1>Speed Climbing Competition</h1>
+    <h1>Speed Climbing Competition Timer</h1>
     
     <div class='competition-layout'>
       <div id='status' class='status stopped'>System Ready - Both Climbers Place Feet</div>
+      
+      <div class='button-group'>
+        <button onclick='toggleMode()' id='modeBtn' class='mode-toggle competition-mode'>Competition Mode</button>
+      </div>
       
       <div class='climber-panel left-panel'>
         <h2>LEFT CLIMBER</h2>
@@ -734,7 +805,8 @@ void handleRoot() {
       </div>
       
       <div class='instructions'>
-        <strong>Competition Instructions:</strong><br>
+        <strong id='instructions-title'>Competition Instructions:</strong><br>
+        <span id='instructions-text'>
         1. Both climbers press and hold foot sensors<br>
         2. Press Start to begin audio sequence<br>
         3. Keep foot sensors pressed during entire audio<br>
@@ -742,6 +814,7 @@ void handleRoot() {
         5. Hit your stop sensor when you reach the top<br>
         6. Early foot release = FALSE START (negative reaction time)!<br>
         <strong>Both climbers can still finish even if one false starts</strong>
+        </span>
       </div>
     </div>
   </div>
@@ -781,8 +854,10 @@ void handleRoot() {
           rightTimer.style.background = 'rgba(255,255,255,0.1)'; // Default background
         }
         
-        // Update foot sensor status - LEFT
+        // Update foot sensor status and ready state based on mode
         const footLeftDiv = document.getElementById('foot-status-left');
+        const footRightDiv = document.getElementById('foot-status-right');
+        
         if(data.foot_left_pressed) {
           footLeftDiv.textContent = 'Foot: Pressed [OK]';
           footLeftDiv.className = 'foot-sensor foot-pressed';
@@ -791,14 +866,48 @@ void handleRoot() {
           footLeftDiv.className = 'foot-sensor foot-released';
         }
         
-        // Update foot sensor status - RIGHT
-        const footRightDiv = document.getElementById('foot-status-right');
         if(data.foot_right_pressed) {
           footRightDiv.textContent = 'Foot: Pressed [OK]';
           footRightDiv.className = 'foot-sensor foot-pressed';
         } else {
           footRightDiv.textContent = 'Foot: Released';
           footRightDiv.className = 'foot-sensor foot-released';
+        }
+        
+        // Update mode button display
+        const modeBtn = document.getElementById('modeBtn');
+        if(data.single_player_mode) {
+          modeBtn.textContent = 'Single Player Mode';
+          modeBtn.className = 'mode-toggle single-mode';
+        } else {
+          modeBtn.textContent = 'Competition Mode';
+          modeBtn.className = 'mode-toggle competition-mode';
+        }
+        
+        // Update instructions based on mode
+        const instructionsTitle = document.getElementById('instructions-title');
+        const instructionsText = document.getElementById('instructions-text');
+        if(data.single_player_mode) {
+          instructionsTitle.textContent = 'Single Player Instructions:';
+          instructionsText.innerHTML = `
+            1. Press and hold ONE foot sensor<br>
+            2. Press Start to begin audio sequence<br>
+            3. Keep foot sensor pressed during entire audio<br>
+            4. Release foot sensor when ready to climb<br>
+            5. Hit your stop sensor when you reach the top<br>
+            6. Early foot release = FALSE START (negative reaction time)!
+          `;
+        } else {
+          instructionsTitle.textContent = 'Competition Instructions:';
+          instructionsText.innerHTML = `
+            1. Both climbers press and hold foot sensors<br>
+            2. Press Start to begin audio sequence<br>
+            3. Keep foot sensors pressed during entire audio<br>
+            4. Release foot sensor when ready to climb<br>
+            5. Hit your stop sensor when you reach the top<br>
+            6. Early foot release = FALSE START (negative reaction time)!<br>
+            <strong>Both climbers can still finish even if one false starts</strong>
+          `;
         }
         
         // Update reaction times (including negative ones for false starts)
@@ -964,10 +1073,10 @@ void handleRoot() {
             statusDiv.textContent = 'Competition Complete!';
             statusDiv.className = 'status stopped';
           } else {
-            statusDiv.textContent = data.both_feet_ready ? 'Ready to Start!' : 'Waiting for Both Feet';
+            statusDiv.textContent = data.ready_to_start ? 'Ready to Start!' : (data.single_player_mode ? 'Waiting for One Foot' : 'Waiting for Both Feet');
             statusDiv.className = 'status stopped';
           }
-          startBtn.disabled = !data.both_feet_ready; 
+          startBtn.disabled = !data.ready_to_start;
           stopBtn.disabled = true;
         }
       };
@@ -978,6 +1087,7 @@ void handleRoot() {
     function startSequence() { ws.send('start'); }
     function stopTimer() { ws.send('stop'); }
     function resetTimer() { ws.send('reset'); }
+    function toggleMode() { ws.send('toggle_mode'); }
 
     connectWebSocket();
   </script>
@@ -997,11 +1107,13 @@ void handleApiStatus() {
   doc["false_start_occurred"] = falseStartOccurred;
   doc["left_false_start"] = leftFalseStart;
   doc["right_false_start"] = rightFalseStart;
+  doc["single_player_mode"] = singlePlayerMode;
   
   // Foot sensor states
   doc["foot_left_pressed"] = footLeftPressed;
   doc["foot_right_pressed"] = footRightPressed;
   doc["both_feet_ready"] = footLeftPressed && footRightPressed;
+  doc["ready_to_start"] = singlePlayerMode ? (footLeftPressed || footRightPressed) : (footLeftPressed && footRightPressed);
   
   // Timing data
   doc["elapsed_time"] = currentElapsedTime;
@@ -1030,7 +1142,17 @@ void handleApiStatus() {
 }
 
 void handleApiStart() {
-  if (footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart) {
+  bool canStart = false;
+  
+  if (singlePlayerMode) {
+    // Single player: allow if at least one foot sensor is pressed
+    canStart = (footLeftPressed || footRightPressed) && !isPlayingAudio && !isPlayingFalseStart;
+  } else {
+    // Competition mode: require BOTH foot sensors
+    canStart = footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart;
+  }
+  
+  if (canStart) {
     falseStartOccurred = false;
     leftFalseStart = false;
     rightFalseStart = false;
@@ -1047,8 +1169,10 @@ void handleApiStart() {
     rightFinished = false;
     startAudioSequence();
     server.send(200, "application/json", "{\"status\":\"started\"}");
-  } else if (!footLeftPressed || !footRightPressed) {
-    server.send(400, "application/json", "{\"error\":\"both foot sensors must be pressed\"}");
+  } else if (singlePlayerMode && !footLeftPressed && !footRightPressed) {
+    server.send(400, "application/json", "{\"error\":\"at least one foot sensor must be pressed in single player mode\"}");
+  } else if (!singlePlayerMode && (!footLeftPressed || !footRightPressed)) {
+    server.send(400, "application/json", "{\"error\":\"both foot sensors must be pressed in competition mode\"}");
   } else {
     server.send(400, "application/json", "{\"error\":\"audio already playing\"}");
   }
