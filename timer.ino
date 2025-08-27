@@ -376,16 +376,13 @@ void completeAudioSequence() {
     reactionTimeRight = (long)rightFalseStartTime - (long)audioEndTime; // This will be negative
   }
   
+  // FIXED: Always start timer immediately when audio sequence completes
+  startTimer();
+  
+  // Play false start beep AFTER starting timer (doesn't delay valid competitor)
   if (falseStartOccurred && !falseStartAudioPlayed) {
-    // False start(s) occurred during audio, play false start sequence ONCE
     falseStartAudioPlayed = true;
     startFalseStartSequence();
-  } else if (!falseStartOccurred) {
-    // No false starts, start the timer normally
-    startTimer();
-  } else {
-    // False starts occurred, but still start timer so both competitors can finish
-    startTimer();
   }
   
   sendWebSocketUpdate(); // Immediate update when audio completes
@@ -395,10 +392,7 @@ void completeFalseStartSequence() {
   isPlayingFalseStart = false;
   currentAudioStep = 0;
   
-  // Start timer even after false start sequence so competitors can still finish
-  if (!isTimerRunning) {
-    startTimer();
-  }
+  // Timer is already running from when main audio completed - no need to start it again
   
   sendWebSocketUpdate(); // Immediate update when false start sequence completes
 }
