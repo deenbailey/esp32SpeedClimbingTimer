@@ -79,7 +79,7 @@ unsigned long currentElapsedTime = 0;
 bool isPlayingAudio = false;
 bool isPlayingFalseStart = false;
 
-// Sensor states (volatile for interrupt safety)
+// Sensor states - volatile for interrupt safety
 volatile bool startButtonPressed = false;
 volatile bool stopLeftPressed = false;
 volatile bool stopRightPressed = false;
@@ -92,29 +92,36 @@ volatile bool leftFootValidDuringAudio = true;  // Track if left foot stayed pre
 volatile bool rightFootValidDuringAudio = true; // Track if right foot stayed pressed during audio
 bool falseStartAudioPlayed = false;    // Ensure false start audio only plays once
 
-// NEW: Track when false starts occur for negative reaction time calculation (volatile for interrupt accuracy)
+// Track when false starts occur for negative reaction time calculation
 volatile unsigned long leftFalseStartTime = 0;
 volatile unsigned long rightFalseStartTime = 0;
 
-// Left side timing (volatile for interrupt safety)
-volatile long reactionTimeLeft = 0;  // Changed to signed long to allow negative values
+// Left side timing - volatile for interrupt access
+volatile long reactionTimeLeft = 0;
 volatile unsigned long completionTimeLeft = 0;
 volatile bool leftFinished = false;
 
-// Right side timing (volatile for interrupt safety)
-volatile long reactionTimeRight = 0;  // Changed to signed long to allow negative values
+// Right side timing - volatile for interrupt access  
+volatile long reactionTimeRight = 0;
 volatile unsigned long completionTimeRight = 0;
 volatile bool rightFinished = false;
 
 volatile unsigned long audioEndTime = 0;
 
-// Interrupt debounce variables
+// Interrupt control variables
 volatile unsigned long lastStartButtonTime = 0;
 volatile unsigned long lastStopLeftTime = 0;
 volatile unsigned long lastStopRightTime = 0;
 volatile unsigned long lastFootLeftTime = 0;
 volatile unsigned long lastFootRightTime = 0;
-const unsigned long INTERRUPT_DEBOUNCE = 50; // 50ms debounce for interrupts
+const unsigned long INTERRUPT_DEBOUNCE = 50; // 50ms debounce
+
+// Event flags for main loop processing
+volatile bool startButtonFlag = false;
+volatile bool stopLeftFlag = false;
+volatile bool stopRightFlag = false;
+volatile bool footLeftChangeFlag = false;
+volatile bool footRightChangeFlag = false;
 
 unsigned long lastWebSocketUpdate = 0;
 const unsigned long WEBSOCKET_UPDATE_INTERVAL = 50; // Update every 50ms
@@ -122,13 +129,6 @@ const unsigned long WEBSOCKET_UPDATE_INTERVAL = 50; // Update every 50ms
 // Non-blocking audio sequence state
 int currentAudioStep = 0;
 unsigned long audioStepStartTime = 0;
-
-// Interrupt flags for main loop processing
-volatile bool startButtonFlag = false;
-volatile bool stopLeftFlag = false;
-volatile bool stopRightFlag = false;
-volatile bool footLeftChangeFlag = false;
-volatile bool footRightChangeFlag = false;
 
 void setup() {
   Serial.begin(115200);
@@ -140,17 +140,17 @@ void setup() {
   pinMode(FOOT_SENSOR_LEFT, INPUT_PULLUP);
   pinMode(FOOT_SENSOR_RIGHT, INPUT_PULLUP);
   
-  // Initialize sensor states based on current pin readings
+  // Read initial sensor states
   startButtonPressed = !digitalRead(START_BUTTON);
   stopLeftPressed = !digitalRead(STOP_SENSOR_LEFT);
   stopRightPressed = !digitalRead(STOP_SENSOR_RIGHT);
   footLeftPressed = (digitalRead(FOOT_SENSOR_LEFT) == LOW);
   footRightPressed = (digitalRead(FOOT_SENSOR_RIGHT) == LOW);
   
-  // Setup interrupts for all sensors (both rising and falling edges for state changes)
+  // Attach interrupts for critical timing sensors
   attachInterrupt(digitalPinToInterrupt(START_BUTTON), startButtonISR, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(STOP_SENSOR_LEFT), stopLeftISR, FALLING); // Only trigger on sensor activation
-  attachInterrupt(digitalPinToInterrupt(STOP_SENSOR_RIGHT), stopRightISR, FALLING); // Only trigger on sensor activation  
+  attachInterrupt(digitalPinToInterrupt(STOP_SENSOR_LEFT), stopLeftISR, FALLING);  // Trigger on activation
+  attachInterrupt(digitalPinToInterrupt(STOP_SENSOR_RIGHT), stopRightISR, FALLING); // Trigger on activation
   attachInterrupt(digitalPinToInterrupt(FOOT_SENSOR_LEFT), footLeftISR, CHANGE);
   attachInterrupt(digitalPinToInterrupt(FOOT_SENSOR_RIGHT), footRightISR, CHANGE);
   
@@ -215,10 +215,13 @@ void IRAM_ATTR startButtonISR() {
 void IRAM_ATTR stopLeftISR() {
   unsigned long currentTime = millis();
   if (currentTime - lastStopLeftTime > INTERRUPT_DEBOUNCE) {
-    if (!digitalRead(STOP_SENSOR_LEFT) && !stopLeftPressed) {
-      // Sensor activated
-      stopLeftPressed = true;
-      stopLeftFlag = true;
+    if (!digitalRead(STOP_SENSOR_LEFT)) {
+      // Sensor activated - record completion time immediately for maximum accuracy
+      if (isTimerRunning && !leftFinished) {
+        completionTimeLeft = currentTime - timerStartTime;
+        leftFinished = true;
+        stopLeftFlag = true;
+      }
       lastStopLeftTime = currentTime;
     }
   }
@@ -227,10 +230,13 @@ void IRAM_ATTR stopLeftISR() {
 void IRAM_ATTR stopRightISR() {
   unsigned long currentTime = millis();
   if (currentTime - lastStopRightTime > INTERRUPT_DEBOUNCE) {
-    if (!digitalRead(STOP_SENSOR_RIGHT) && !stopRightPressed) {
-      // Sensor activated
-      stopRightPressed = true;
-      stopRightFlag = true;
+    if (!digitalRead(STOP_SENSOR_RIGHT)) {
+      // Sensor activated - record completion time immediately for maximum accuracy
+      if (isTimerRunning && !rightFinished) {
+        completionTimeRight = currentTime - timerStartTime;
+        rightFinished = true;
+        stopRightFlag = true;
+      }
       lastStopRightTime = currentTime;
     }
   }
@@ -254,13 +260,11 @@ void IRAM_ATTR footLeftISR() {
         leftFootValidDuringAudio = false;
         leftFalseStart = true;
         falseStartOccurred = true;
-        leftFalseStartTime = currentTime; // Record precise timing
+        leftFalseStartTime = currentTime;
       }
       // Handle normal reaction time calculation immediately in ISR
-      else if (audioEndTime > 0 && reactionTimeLeft == 0) {
-        if (!leftFalseStart) {
-          reactionTimeLeft = currentTime - audioEndTime;
-        }
+      else if (audioEndTime > 0 && reactionTimeLeft == 0 && !leftFalseStart) {
+        reactionTimeLeft = currentTime - audioEndTime;
       }
       
       footLeftChangeFlag = true;
@@ -287,13 +291,11 @@ void IRAM_ATTR footRightISR() {
         rightFootValidDuringAudio = false;
         rightFalseStart = true;
         falseStartOccurred = true;
-        rightFalseStartTime = currentTime; // Record precise timing
+        rightFalseStartTime = currentTime;
       }
       // Handle normal reaction time calculation immediately in ISR
-      else if (audioEndTime > 0 && reactionTimeRight == 0) {
-        if (!rightFalseStart) {
-          reactionTimeRight = currentTime - audioEndTime;
-        }
+      else if (audioEndTime > 0 && reactionTimeRight == 0 && !rightFalseStart) {
+        reactionTimeRight = currentTime - audioEndTime;
       }
       
       footRightChangeFlag = true;
@@ -310,17 +312,17 @@ void processInterruptFlags() {
     handleStartButton();
   }
   
-  // Process stop sensor events
-  if (stopLeftFlag) {
+  // Process stop sensor events - check if both finished to stop timer
+  if (stopLeftFlag || stopRightFlag) {
     stopLeftFlag = false;
-    stopLeftPressed = false; // Reset for next activation
-    handleStopSensor(true); // true for left side
-  }
-  
-  if (stopRightFlag) {
     stopRightFlag = false;
-    stopRightPressed = false; // Reset for next activation
-    handleStopSensor(false); // false for right side
+    
+    // Stop timer when both competitors finish (regardless of false starts)
+    if (leftFinished && rightFinished) {
+      stopTimer();
+    }
+    
+    sendWebSocketUpdate(); // Immediate update when stop sensor triggered
   }
   
   // Process foot sensor change events
@@ -344,8 +346,8 @@ void handleStartButton() {
     leftFootValidDuringAudio = true;
     rightFootValidDuringAudio = true;
     falseStartAudioPlayed = false;
-    leftFalseStartTime = 0; // NEW: Reset false start times
-    rightFalseStartTime = 0; // NEW: Reset false start times
+    leftFalseStartTime = 0; // Reset false start times
+    rightFalseStartTime = 0; // Reset false start times
     reactionTimeLeft = 0;
     reactionTimeRight = 0;
     completionTimeLeft = 0;
@@ -458,7 +460,7 @@ void completeAudioSequence() {
   currentAudioStep = 0;
   audioEndTime = millis(); // Record when audio ended
   
-  // NEW: Calculate negative reaction times for false starts
+  // Calculate negative reaction times for false starts
   if (leftFalseStart && leftFalseStartTime > 0) {
     // Calculate how early they started (negative reaction time)
     reactionTimeLeft = (long)leftFalseStartTime - (long)audioEndTime; // This will be negative
@@ -511,8 +513,8 @@ void resetTimer() {
   leftFootValidDuringAudio = true;
   rightFootValidDuringAudio = true;
   falseStartAudioPlayed = false;
-  leftFalseStartTime = 0; // NEW: Reset false start times
-  rightFalseStartTime = 0; // NEW: Reset false start times
+  leftFalseStartTime = 0; // Reset false start times
+  rightFalseStartTime = 0; // Reset false start times
   reactionTimeLeft = 0;
   reactionTimeRight = 0;
   completionTimeLeft = 0;
@@ -557,8 +559,8 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
             leftFootValidDuringAudio = true;
             rightFootValidDuringAudio = true;
             falseStartAudioPlayed = false;
-            leftFalseStartTime = 0; // NEW: Reset false start times
-            rightFalseStartTime = 0; // NEW: Reset false start times
+            leftFalseStartTime = 0; // Reset false start times
+            rightFalseStartTime = 0; // Reset false start times
             reactionTimeLeft = 0;
             reactionTimeRight = 0;
             completionTimeLeft = 0;
@@ -628,14 +630,14 @@ void sendWebSocketUpdate() {
   
   // Left side data (including negative reaction times)
   doc["reaction_time_left"] = reactionTimeLeft;
-  doc["formatted_reaction_time_left"] = formatSignedTime(reactionTimeLeft); // NEW: Use signed time formatter
+  doc["formatted_reaction_time_left"] = formatSignedTime(reactionTimeLeft);
   doc["completion_time_left"] = completionTimeLeft;
   doc["formatted_completion_time_left"] = formatTime(completionTimeLeft);
   doc["left_finished"] = leftFinished;
   
   // Right side data (including negative reaction times)
   doc["reaction_time_right"] = reactionTimeRight;
-  doc["formatted_reaction_time_right"] = formatSignedTime(reactionTimeRight); // NEW: Use signed time formatter
+  doc["formatted_reaction_time_right"] = formatSignedTime(reactionTimeRight);
   doc["completion_time_right"] = completionTimeRight;
   doc["formatted_completion_time_right"] = formatTime(completionTimeRight);
   doc["right_finished"] = rightFinished;
@@ -659,7 +661,7 @@ String formatTime(unsigned long milliseconds) {
   return String(timeStr);
 }
 
-// NEW: Format signed time for reaction times (can be negative for false starts)
+// Format signed time for reaction times (can be negative for false starts)
 String formatSignedTime(long milliseconds) {
   if (milliseconds == 0) {
     return "0:00.000";
@@ -741,8 +743,7 @@ void handleRoot() {
     .running { background: rgba(34,197,94,0.3); }
     .stopped { background: rgba(239,68,68,0.3); }
     .playing { background: rgba(251,191,36,0.3); }
-    .false-start-left { background: rgba(220,38,38,0.4); border: 2px solid #dc2626; }
-    .false-start-right { background: rgba(220,38,38,0.4); border: 2px solid #dc2626; }
+    .false-start { background: rgba(220,38,38,0.4); border: 2px solid #dc2626; }
     .disqualified { 
       opacity: 0.8; 
       background: rgba(220,38,38,0.2) !important;
@@ -838,7 +839,7 @@ void handleRoot() {
         4. Release foot sensor when ready to climb<br>
         5. Hit your stop sensor when you reach the top<br>
         6. Early foot release = FALSE START (negative reaction time)!<br>
-        <strong>NEW:</strong> Both climbers can still finish even if one false starts
+        <strong>Both climbers can still finish even if one false starts</strong>
       </div>
     </div>
   </div>
@@ -949,7 +950,7 @@ void handleRoot() {
         leftPanel.classList.remove('winner', 'disqualified');
         rightPanel.classList.remove('winner', 'disqualified');
         
-        // NEW: Mark false start competitors as disqualified (but still show their completion time)
+        // Mark false start competitors as disqualified (but still show their completion time)
         if(data.left_false_start) {
           leftPanel.classList.add('disqualified');
         }
@@ -983,7 +984,7 @@ void handleRoot() {
           completionRightDiv.style.display = 'none';
         }
         
-        // NEW: Highlight winner only among non-disqualified competitors
+        // Highlight winner only among non-disqualified competitors
         if(!data.left_false_start && !data.right_false_start) {
           // Both competitors valid
           if(data.completion_time_left > 0 && data.completion_time_right > 0) {
@@ -1092,6 +1093,8 @@ void handleApiStatus() {
   doc["is_playing_audio"] = isPlayingAudio;
   doc["is_playing_false_start"] = isPlayingFalseStart;
   doc["false_start_occurred"] = falseStartOccurred;
+  doc["left_false_start"] = leftFalseStart;
+  doc["right_false_start"] = rightFalseStart;
   
   // Foot sensor states
   doc["foot_left_pressed"] = footLeftPressed;
@@ -1132,8 +1135,8 @@ void handleApiStart() {
     leftFootValidDuringAudio = true;
     rightFootValidDuringAudio = true;
     falseStartAudioPlayed = false;
-    leftFalseStartTime = 0; // NEW: Reset false start times
-    rightFalseStartTime = 0; // NEW: Reset false start times
+    leftFalseStartTime = 0; // Reset false start times
+    rightFalseStartTime = 0; // Reset false start times
     reactionTimeLeft = 0;
     reactionTimeRight = 0;
     completionTimeLeft = 0;
