@@ -189,13 +189,16 @@ void checkButtons() {
     footLeftPressed = true;
   } else if (!footLeftNow && footLeftPressed) {
     footLeftPressed = false;
-    if (!isPlayingAudio && !isPlayingFalseStart && isTimerRunning) {
-      // Calculate reaction time (positive if after audio, negative if false start)
-      if (!leftFalseStart) {
+    
+    // Calculate reaction time whenever foot is released after we have an audioEndTime
+    if (audioEndTime > 0 && reactionTimeLeft == 0) {
+      if (leftFalseStart && leftFalseStartTime > 0) {
+        // Already calculated negative reaction time in completeAudioSequence()
+        // Don't recalculate
+      } else {
         // Normal reaction time - foot released after audio ended
         reactionTimeLeft = millis() - audioEndTime;
       }
-      // Note: For false starts, we calculate negative reaction time in completeAudioSequence()
       sendWebSocketUpdate();
     }
   }
@@ -205,13 +208,16 @@ void checkButtons() {
     footRightPressed = true;
   } else if (!footRightNow && footRightPressed) {
     footRightPressed = false;
-    if (!isPlayingAudio && !isPlayingFalseStart && isTimerRunning) {
-      // Calculate reaction time (positive if after audio, negative if false start)
-      if (!rightFalseStart) {
+    
+    // Calculate reaction time whenever foot is released after we have an audioEndTime
+    if (audioEndTime > 0 && reactionTimeRight == 0) {
+      if (rightFalseStart && rightFalseStartTime > 0) {
+        // Already calculated negative reaction time in completeAudioSequence()
+        // Don't recalculate
+      } else {
         // Normal reaction time - foot released after audio ended
         reactionTimeRight = millis() - audioEndTime;
       }
-      // Note: For false starts, we calculate negative reaction time in completeAudioSequence()
       sendWebSocketUpdate();
     }
   }
