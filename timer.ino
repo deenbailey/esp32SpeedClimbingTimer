@@ -99,7 +99,7 @@ bool rightFinished = false;
 unsigned long audioEndTime = 0;
 unsigned long lastButtonCheck = 0;
 unsigned long lastWebSocketUpdate = 0;
-const unsigned long BUTTON_DEBOUNCE = 50;
+const unsigned long BUTTON_DEBOUNCE = 10;
 const unsigned long WEBSOCKET_UPDATE_INTERVAL = 50; // Update every 50ms
 
 // Non-blocking audio sequence state
