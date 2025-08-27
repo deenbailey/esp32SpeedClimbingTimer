@@ -661,54 +661,106 @@ void handleRoot() {
       margin: 20px 0;
     }
     .climber-panel {
-      background: rgba(255,255,255,0.05);
-      padding: 20px;
-      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+      padding: 25px;
+      border-radius: 15px;
       text-align: center;
+      border: 1px solid rgba(255,255,255,0.2);
+      box-shadow: 0 8px 25px rgba(0,0,0,0.15);
     }
     .timer-display {
-      font-size: 3.5em;
+      font-size: 3.8em;
       font-weight: bold;
-      margin: 20px 0;
-      text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
-      background: rgba(255,255,255,0.1);
-      padding: 20px;
-      border-radius: 10px;
+      margin: 25px 0;
+      text-shadow: 3px 3px 6px rgba(0,0,0,0.6);
+      background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.08));
+      padding: 25px;
+      border-radius: 15px;
+      border: 1px solid rgba(255,255,255,0.3);
+      box-shadow: inset 0 2px 10px rgba(0,0,0,0.2);
     }
     .status {
       text-align: center;
       margin: 20px 0;
       font-size: 1.2em;
-      padding: 10px;
-      border-radius: 5px;
+      padding: 15px;
+      border-radius: 10px;
       grid-column: 1 / -1;
+      background: rgba(0,100,0,0.7);
+      border: 2px solid rgba(255,255,255,0.2);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
-    .running { background: rgba(34,197,94,0.3); }
-    .stopped { background: rgba(239,68,68,0.3); }
-    .playing { background: rgba(251,191,36,0.3); }
-    .false-start { background: rgba(220,38,38,0.4); border: 2px solid #dc2626; }
+    .running { 
+      background: linear-gradient(135deg, rgba(0,150,0,0.8), rgba(0,100,0,0.9));
+      animation: pulse-green 2s ease-in-out infinite alternate;
+    }
+    .stopped { 
+      background: rgba(0,100,0,0.7);
+    }
+    .playing { 
+      background: linear-gradient(135deg, rgba(255,193,7,0.8), rgba(255,152,0,0.8));
+      animation: pulse-yellow 1s ease-in-out infinite alternate;
+    }
+    .false-start { 
+      background: linear-gradient(135deg, rgba(220,38,38,0.8), rgba(185,28,28,0.9));
+      border: 2px solid #dc2626;
+      animation: pulse-red 0.5s ease-in-out infinite alternate;
+    }
+    @keyframes pulse-green {
+      from { box-shadow: 0 4px 15px rgba(0,150,0,0.4); }
+      to { box-shadow: 0 6px 25px rgba(0,150,0,0.7); }
+    }
+    @keyframes pulse-yellow {
+      from { box-shadow: 0 4px 15px rgba(255,193,7,0.4); }
+      to { box-shadow: 0 6px 25px rgba(255,193,7,0.7); }
+    }
+    @keyframes pulse-red {
+      from { box-shadow: 0 4px 15px rgba(220,38,38,0.6); }
+      to { box-shadow: 0 8px 30px rgba(220,38,38,0.9); }
+    }
     .disqualified { 
       opacity: 0.8; 
       background: rgba(220,38,38,0.2) !important;
       border: 2px solid #dc2626 !important;
     }
     .foot-sensor {
-      padding: 8px;
-      border-radius: 5px;
+      padding: 12px;
+      border-radius: 8px;
       font-weight: bold;
-      margin: 10px 0;
+      margin: 12px 0;
+      border: 1px solid rgba(255,255,255,0.2);
+      transition: all 0.3s ease;
     }
-    .foot-pressed { background: rgba(34,197,94,0.3); }
-    .foot-released { background: rgba(239,68,68,0.3); }
+    .foot-pressed { 
+      background: linear-gradient(135deg, rgba(34,197,94,0.4), rgba(22,163,74,0.5)); 
+      box-shadow: 0 4px 15px rgba(34,197,94,0.3);
+    }
+    .foot-released { 
+      background: linear-gradient(135deg, rgba(239,68,68,0.4), rgba(220,38,38,0.5)); 
+      box-shadow: 0 4px 15px rgba(239,68,68,0.3);
+    }
     .reaction-time, .completion-time {
-      padding: 8px;
-      border-radius: 5px;
-      margin: 5px 0;
+      padding: 10px;
+      border-radius: 8px;
+      margin: 8px 0;
       font-size: 0.9em;
+      border: 1px solid rgba(255,255,255,0.2);
+      transition: all 0.3s ease;
     }
-    .reaction-time { background: rgba(251,191,36,0.2); }
-    .reaction-time.negative { background: rgba(220,38,38,0.3); color: #ff6b6b; font-weight: bold; }
-    .completion-time { background: rgba(34,197,94,0.2); }
+    .reaction-time { 
+      background: linear-gradient(135deg, rgba(251,191,36,0.3), rgba(245,158,11,0.4)); 
+      box-shadow: 0 3px 12px rgba(251,191,36,0.2);
+    }
+    .reaction-time.negative { 
+      background: linear-gradient(135deg, rgba(220,38,38,0.4), rgba(185,28,28,0.5)); 
+      color: #ff8a80; 
+      font-weight: bold; 
+      box-shadow: 0 3px 12px rgba(220,38,38,0.4);
+    }
+    .completion-time { 
+      background: linear-gradient(135deg, rgba(34,197,94,0.3), rgba(22,163,74,0.4)); 
+      box-shadow: 0 3px 12px rgba(34,197,94,0.2);
+    }
     .winner { 
       background: rgba(255,215,0,0.3) !important; 
       border: 2px solid gold;
@@ -719,55 +771,71 @@ void handleRoot() {
       to { box-shadow: 0 0 20px rgba(255,215,0,0.8); }
     }
     button {
-      background: rgba(255,255,255,0.2);
+      background: linear-gradient(135deg, rgba(255,255,255,0.25), rgba(255,255,255,0.15));
       color: white;
-      border: 2px solid rgba(255,255,255,0.3);
-      padding: 15px 25px;
-      margin: 5px;
-      border-radius: 8px;
+      border: 2px solid rgba(255,255,255,0.4);
+      padding: 15px 30px;
+      margin: 8px;
+      border-radius: 12px;
       cursor: pointer;
       font-size: 16px;
       font-weight: bold;
       transition: all 0.3s ease;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
-    button:hover { background: rgba(255,255,255,0.3); transform: translateY(-2px); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    button:hover { 
+      background: linear-gradient(135deg, rgba(255,255,255,0.35), rgba(255,255,255,0.25)); 
+      transform: translateY(-3px); 
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    }
+    button:disabled { 
+      opacity: 0.4; 
+      cursor: not-allowed; 
+      transform: none; 
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
     .button-group { text-align: center; margin: 20px 0; grid-column: 1 / -1; }
     .mode-toggle {
       background: rgba(255,255,255,0.15);
       border: 2px solid rgba(255,255,255,0.4);
-      padding: 12px 20px;
-      border-radius: 25px;
+      padding: 12px 24px;
+      border-radius: 30px;
       font-size: 14px;
       font-weight: bold;
       position: relative;
       overflow: hidden;
-      transition: all 0.3s ease;
-      margin: 10px;
+      transition: all 0.4s ease;
+      margin: 15px auto;
+      display: block;
+      width: fit-content;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.4);
     }
     .mode-toggle.single-mode {
-      background: linear-gradient(45deg, #ff6b6b, #ff8e8e);
+      background: linear-gradient(135deg, #ff6b6b, #ff8e8e);
       border-color: #ff4757;
-      box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+      box-shadow: 0 6px 20px rgba(255, 107, 107, 0.5);
     }
     .mode-toggle.competition-mode {
-      background: linear-gradient(45deg, #4CAF50, #66BB6A);
+      background: linear-gradient(135deg, #4CAF50, #66BB6A);
       border-color: #45A049;
-      box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+      box-shadow: 0 6px 20px rgba(76, 175, 80, 0.5);
     }
     .mode-toggle:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(255,255,255,0.3);
+      transform: translateY(-3px) scale(1.02);
+      box-shadow: 0 8px 25px rgba(255,255,255,0.3);
     }
     h1 { text-align: center; margin-bottom: 30px; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
     h2 { margin-top: 0; }
     .instructions { 
-      background: rgba(255,255,255,0.1); 
-      padding: 15px; 
-      border-radius: 8px; 
-      margin: 20px 0; 
+      background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.08)); 
+      padding: 20px; 
+      border-radius: 12px; 
+      margin: 25px 0; 
       grid-column: 1 / -1;
       font-size: 0.9em;
+      border: 1px solid rgba(255,255,255,0.25);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.15);
     }
   </style>
 </head>
@@ -777,10 +845,6 @@ void handleRoot() {
     
     <div class='competition-layout'>
       <div id='status' class='status stopped'>System Ready - Both Climbers Place Feet</div>
-      
-      <div class='button-group'>
-        <button onclick='toggleMode()' id='modeBtn' class='mode-toggle competition-mode'>🏆 Competition Mode</button>
-      </div>
       
       <div class='climber-panel left-panel'>
         <h2>LEFT CLIMBER</h2>
@@ -799,9 +863,9 @@ void handleRoot() {
       </div>
       
       <div class='button-group'>
-        <button onclick='startSequence()' id='startBtn'>Start Competition</button>
-        <button onclick='stopTimer()' id='stopBtn' disabled>Stop Timer</button>
-        <button onclick='resetTimer()' id='resetBtn'>Reset</button>
+        <button onclick='startSequence()' id='startBtn'>🚀 Start Competition</button>
+        <button onclick='resetTimer()' id='resetBtn'>🔄 Reset</button>
+        <button onclick='toggleMode()' id='modeBtn' class='mode-toggle competition-mode'>🏆 Competition Mode</button>
       </div>
       
       <div class='instructions'>
@@ -1038,7 +1102,7 @@ void handleRoot() {
           }
           statusDiv.textContent = falseStartMsg;
           statusDiv.className = 'status false-start';
-          startBtn.disabled = true; stopBtn.disabled = true;
+          startBtn.disabled = true; stopBtn.disabled = false; stopBtn.disabled = true; stopBtn.disabled = true; stopBtn.disabled = true;
         } else if(data.is_playing_audio) {
           statusDiv.textContent = 'Audio Sequence Playing - Keep Feet Pressed!';
           statusDiv.className = 'status playing';
@@ -1078,6 +1142,7 @@ void handleRoot() {
           }
           startBtn.disabled = !data.ready_to_start;
           stopBtn.disabled = true;
+          stopBtn.disabled = true;
         }
       };
       ws.onclose = function() { console.log('WebSocket disconnected'); setTimeout(connectWebSocket, 3000); };
@@ -1085,7 +1150,6 @@ void handleRoot() {
     }
 
     function startSequence() { ws.send('start'); }
-    function stopTimer() { ws.send('stop'); }
     function resetTimer() { ws.send('reset'); }
     function toggleMode() { ws.send('toggle_mode'); }
 
