@@ -3,16 +3,17 @@
 #include <ArduinoJson.h>
 #include <WebSocketsServer.h>
 #include <FastLED.h>
+#include <SPIFFS.h>
 
 // GPIO 4 for LEDs causes E (81) phy_comm: gpio[1] number: 25 is reserved
 
 // ================== Hardware Config ==================
-#define START_BUTTON 19 // done
-#define STOP_SENSOR_LEFT  14
-#define STOP_SENSOR_RIGHT  33
+#define START_BUTTON 19  // done
+#define STOP_SENSOR_LEFT 14
+#define STOP_SENSOR_RIGHT 33
 #define FOOT_SENSOR_LEFT 13
 #define FOOT_SENSOR_RIGHT 26
-#define AUDIO_PIN    22
+#define AUDIO_PIN 22
 
 // ================== LED Strip Config ==================
 #define LED_PIN_LEFT 17
@@ -27,8 +28,8 @@ const char* ssid = "Nacho WiFi";
 const char* password = "airforce11";
 
 // ================== Audio Config ==================
-#define LEDC_CHANNEL     0
-#define LEDC_RESOLUTION  8
+#define LEDC_CHANNEL 0
+#define LEDC_RESOLUTION 8
 
 // Audio sequence timing (all in milliseconds)
 struct AudioStep {
@@ -37,41 +38,52 @@ struct AudioStep {
 };
 
 const AudioStep audioSequence[] = {
-  {0, 500},      // Silence 500ms
-  {880, 250},    // 880Hz for 250ms
-  {0, 500},      // Silence 500ms
-  {880, 250},    // 880Hz for 250ms
-  {0, 500},      // Silence 500ms
-  {1760, 150}    // 1760Hz for 150ms
+  { 0, 500 },    // Silence 500ms
+  { 880, 250 },  // 880Hz for 250ms
+  { 0, 500 },    // Silence 500ms
+  { 880, 250 },  // 880Hz for 250ms
+  { 0, 500 },    // Silence 500ms
+  { 1760, 150 }  // 1760Hz for 150ms
 };
 
 const int AUDIO_SEQUENCE_LENGTH = sizeof(audioSequence) / sizeof(AudioStep);
 
 // False start audio sequence
 const AudioStep falseStartSequence[] = {
-  {1568, 100},   // 1568Hz for 100ms
-  {0, 100},      // Silence for 100ms
-  {1568, 100},   // 1568Hz for 100ms
-  {0, 100},      // Silence for 100ms
-  {1568, 100},   // 1568Hz for 100ms
-  {0, 100},      // Silence for 100ms
-  {1568, 100},   // 1568Hz for 100ms
-  {0, 100},      // Silence for 100ms
-  {1568, 100},   // 1568Hz for 100ms
-  {0, 100},      // Silence for 100ms
-  {1568, 100},   // 1568Hz for 100ms
-  {0, 100},      // Silence for 100ms
-  {1568, 100},   // 1568Hz for 100ms
-  {0, 100},      // Silence for 100ms
-  {1568, 100},   // 1568Hz for 100ms
-  {0, 100},      // Silence for 100ms
-  {1568, 100},   // 1568Hz for 100ms
-  {0, 100},      // Silence for 100ms
-  {1568, 100},   // 1568Hz for 100ms
-  {0, 100}       // Final silence for 100ms
+  { 1568, 100 },  // 1568Hz for 100ms
+  { 0, 100 },     // Silence for 100ms
+  { 1568, 100 },  // 1568Hz for 100ms
+  { 0, 100 },     // Silence for 100ms
+  { 1568, 100 },  // 1568Hz for 100ms
+  { 0, 100 },     // Silence for 100ms
+  { 1568, 100 },  // 1568Hz for 100ms
+  { 0, 100 },     // Silence for 100ms
+  { 1568, 100 },  // 1568Hz for 100ms
+  { 0, 100 },     // Silence for 100ms
+  { 1568, 100 },  // 1568Hz for 100ms
+  { 0, 100 },     // Silence for 100ms
+  { 1568, 100 },  // 1568Hz for 100ms
+  { 0, 100 },     // Silence for 100ms
+  { 1568, 100 },  // 1568Hz for 100ms
+  { 0, 100 },     // Silence for 100ms
+  { 1568, 100 },  // 1568Hz for 100ms
+  { 0, 100 },     // Silence for 100ms
+  { 1568, 100 },  // 1568Hz for 100ms
+  { 0, 100 }      // Final silence for 100ms
 };
 
 const int FALSE_START_SEQUENCE_LENGTH = sizeof(falseStartSequence) / sizeof(AudioStep);
+
+// ================== Spiffs Config ==================
+#define MAX_LEADERBOARD_ENTRIES 10
+#define LEADERBOARD_FILE "/leaderboard.json"
+
+struct LeaderboardEntry {
+  String name;
+  unsigned long time_ms;
+  String formatted_time;
+  String date;
+};
 
 // ================== Global Variables ==================
 WebServer server(80);
@@ -89,10 +101,10 @@ bool footRightPressed = false;
 bool falseStartOccurred = false;
 bool leftFalseStart = false;
 bool rightFalseStart = false;
-bool leftFootValidDuringAudio = true;  // Track if left foot stayed pressed during audio
-bool rightFootValidDuringAudio = true; // Track if right foot stayed pressed during audio
-bool falseStartAudioPlayed = false;    // Ensure false start audio only plays once
-bool singlePlayerMode = false;         // New: Single player mode toggle
+bool leftFootValidDuringAudio = true;   // Track if left foot stayed pressed during audio
+bool rightFootValidDuringAudio = true;  // Track if right foot stayed pressed during audio
+bool falseStartAudioPlayed = false;     // Ensure false start audio only plays once
+bool singlePlayerMode = false;          // New: Single player mode toggle
 
 // Track when false starts occur for negative reaction time calculation
 unsigned long leftFalseStartTime = 0;
@@ -112,18 +124,177 @@ unsigned long audioEndTime = 0;
 unsigned long lastButtonCheck = 0;
 unsigned long lastWebSocketUpdate = 0;
 const unsigned long BUTTON_DEBOUNCE = 10;
-const unsigned long WEBSOCKET_UPDATE_INTERVAL = 50; // Update every 50ms
+const unsigned long WEBSOCKET_UPDATE_INTERVAL = 50;  // Update every 50ms
 
 // Non-blocking audio sequence state
 int currentAudioStep = 0;
 unsigned long audioStepStartTime = 0;
 
+LeaderboardEntry leaderboard[MAX_LEADERBOARD_ENTRIES];
+int leaderboardCount = 0;
+
+// ================== Leaderboard functions ==================
+
+void initSPIFFS() {
+  if (!SPIFFS.begin(true)) {
+    Serial.println("An Error has occurred while mounting SPIFFS");
+    return;
+  }
+  Serial.println("SPIFFS mounted successfully");
+  loadLeaderboard();
+}
+
+void loadLeaderboard() {
+  File file = SPIFFS.open(LEADERBOARD_FILE, "r");
+  if (!file) {
+    Serial.println("No leaderboard file found, starting fresh");
+    leaderboardCount = 0;
+    return;
+  }
+
+  String content = file.readString();
+  file.close();
+
+  DynamicJsonDocument doc(2048);
+  deserializeJson(doc, content);
+
+  leaderboardCount = 0;
+  JsonArray entries = doc["entries"];
+  for (JsonObject entry : entries) {
+    if (leaderboardCount >= MAX_LEADERBOARD_ENTRIES) break;
+
+    leaderboard[leaderboardCount].name = entry["name"].as<String>();
+    leaderboard[leaderboardCount].time_ms = entry["time_ms"];
+    leaderboard[leaderboardCount].formatted_time = entry["formatted_time"].as<String>();
+    leaderboard[leaderboardCount].date = entry["date"].as<String>();
+    leaderboardCount++;
+  }
+
+  Serial.printf("Loaded %d leaderboard entries\n", leaderboardCount);
+}
+
+void saveLeaderboard() {
+  DynamicJsonDocument doc(2048);
+  JsonArray entries = doc.createNestedArray("entries");
+
+  for (int i = 0; i < leaderboardCount; i++) {
+    JsonObject entry = entries.createNestedObject();
+    entry["name"] = leaderboard[i].name;
+    entry["time_ms"] = leaderboard[i].time_ms;
+    entry["formatted_time"] = leaderboard[i].formatted_time;
+    entry["date"] = leaderboard[i].date;
+  }
+
+  File file = SPIFFS.open(LEADERBOARD_FILE, "w");
+  if (!file) {
+    Serial.println("Failed to open leaderboard file for writing");
+    return;
+  }
+
+  serializeJson(doc, file);
+  file.close();
+  Serial.println("Leaderboard saved");
+}
+
+bool isNewRecord(unsigned long time_ms) {
+  if (leaderboardCount < MAX_LEADERBOARD_ENTRIES) return true;
+  return time_ms < leaderboard[MAX_LEADERBOARD_ENTRIES - 1].time_ms;
+}
+
+void addToLeaderboard(String name, unsigned long time_ms, String formatted_time) {
+  // Find insertion position
+  int insertPos = leaderboardCount;
+  for (int i = 0; i < leaderboardCount; i++) {
+    if (time_ms < leaderboard[i].time_ms) {
+      insertPos = i;
+      break;
+    }
+  }
+
+  // Shift entries down
+  for (int i = min(leaderboardCount, MAX_LEADERBOARD_ENTRIES - 1); i > insertPos; i--) {
+    leaderboard[i] = leaderboard[i - 1];
+  }
+
+  // Insert new entry
+  leaderboard[insertPos].name = name;
+  leaderboard[insertPos].time_ms = time_ms;
+  leaderboard[insertPos].formatted_time = formatted_time;
+
+  // Get current date (simplified - using uptime)
+  unsigned long uptime = millis();
+  unsigned long days = uptime / (24 * 60 * 60 * 1000);
+  unsigned long hours = (uptime % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000);
+  unsigned long minutes = (uptime % (60 * 60 * 1000)) / (60 * 1000);
+  leaderboard[insertPos].date = String(days) + "d " + String(hours) + "h " + String(minutes) + "m";
+
+  if (leaderboardCount < MAX_LEADERBOARD_ENTRIES) {
+    leaderboardCount++;
+  }
+
+  saveLeaderboard();
+}
+
+String getLeaderboardJson() {
+  DynamicJsonDocument doc(2048);
+  JsonArray entries = doc.createNestedArray("entries");
+
+  for (int i = 0; i < leaderboardCount; i++) {
+    JsonObject entry = entries.createNestedObject();
+    entry["rank"] = i + 1;
+    entry["name"] = leaderboard[i].name;
+    entry["time_ms"] = leaderboard[i].time_ms;
+    entry["formatted_time"] = leaderboard[i].formatted_time;
+    entry["date"] = leaderboard[i].date;
+  }
+
+  String result;
+  serializeJson(doc, result);
+  return result;
+}
+
+void handleApiGetLeaderboard() {
+  String response = getLeaderboardJson();
+  server.send(200, "application/json", response);
+}
+
+void handleApiAddRecord() {
+  if (!server.hasArg("name") || !server.hasArg("time_ms") || !server.hasArg("formatted_time")) {
+    server.send(400, "application/json", "{\"error\":\"Missing required parameters\"}");
+    return;
+  }
+
+  String name = server.arg("name");
+  unsigned long time_ms = server.arg("time_ms").toInt();
+  String formatted_time = server.arg("formatted_time");
+
+  if (name.length() == 0 || name.length() > 20) {
+    server.send(400, "application/json", "{\"error\":\"Name must be 1-20 characters\"}");
+    return;
+  }
+
+  if (!isNewRecord(time_ms)) {
+    server.send(400, "application/json", "{\"error\":\"Time is not good enough for top 10\"}");
+    return;
+  }
+
+  addToLeaderboard(name, time_ms, formatted_time);
+  server.send(200, "application/json", "{\"status\":\"Record added successfully\"}");
+}
+
+void handleApiClearLeaderboard() {
+  leaderboardCount = 0;
+  SPIFFS.remove(LEADERBOARD_FILE);
+  server.send(200, "application/json", "{\"status\":\"Leaderboard cleared\"}");
+}
+
+
 // ================== LED Functions ==================
 void initializeLEDs() {
   FastLED.addLeds<WS2812B, LED_PIN_LEFT, GRB>(ledsLeft, NUM_LEDS_PER_STRIP);
   FastLED.addLeds<WS2812B, LED_PIN_RIGHT, GRB>(ledsRight, NUM_LEDS_PER_STRIP);
-  FastLED.setBrightness(128); // Set brightness to 50%
-  
+  FastLED.setBrightness(128);  // Set brightness to 50%
+
   // Turn off all LEDs initially
   fill_solid(ledsLeft, NUM_LEDS_PER_STRIP, CRGB::Black);
   fill_solid(ledsRight, NUM_LEDS_PER_STRIP, CRGB::Black);
@@ -148,21 +319,23 @@ void turnOffAllLEDs() {
 
 void setup() {
   Serial.begin(115200);
-  
+
+  initSPIFFS();
+
   // Initialize pins
   pinMode(START_BUTTON, INPUT_PULLUP);
   pinMode(STOP_SENSOR_LEFT, INPUT_PULLUP);
   pinMode(STOP_SENSOR_RIGHT, INPUT_PULLUP);
   pinMode(FOOT_SENSOR_LEFT, INPUT_PULLUP);
   pinMode(FOOT_SENSOR_RIGHT, INPUT_PULLUP);
-  
+
   // Initialize LED strips
   initializeLEDs();
-  
+
   // Initialize LEDC for audio - using newer ESP32 Arduino Core functions
-  ledcAttach(AUDIO_PIN, 1000, LEDC_RESOLUTION); // Start with 1kHz base frequency
-  ledcWrite(AUDIO_PIN, 0); // Start with no sound
-  
+  ledcAttach(AUDIO_PIN, 1000, LEDC_RESOLUTION);  // Start with 1kHz base frequency
+  ledcWrite(AUDIO_PIN, 0);                       // Start with no sound
+
   // Connect to WiFi
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
@@ -174,18 +347,21 @@ void setup() {
   Serial.println("WiFi connected!");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
-  
+
   // Setup web server routes
   server.on("/", HTTP_GET, handleRoot);
   server.on("/api/status", HTTP_GET, handleApiStatus);
   server.on("/api/start", HTTP_POST, handleApiStart);
   server.on("/api/stop", HTTP_POST, handleApiStop);
   server.on("/api/reset", HTTP_POST, handleApiReset);
-  
+  server.on("/api/leaderboard", HTTP_GET, handleApiGetLeaderboard);
+  server.on("/api/leaderboard", HTTP_POST, handleApiAddRecord);
+  server.on("/api/leaderboard", HTTP_DELETE, handleApiClearLeaderboard);
+
   // Setup WebSocket server
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
-  
+
   server.begin();
   Serial.println("HTTP server started");
   Serial.println("WebSocket server started on port 81");
@@ -202,16 +378,16 @@ void loop() {
 
 void checkButtons() {
   if (millis() - lastButtonCheck < BUTTON_DEBOUNCE) return;
-  
+
   bool startPressed = !digitalRead(START_BUTTON);
   bool stopLeftNow = !digitalRead(STOP_SENSOR_LEFT);
   bool stopRightNow = !digitalRead(STOP_SENSOR_RIGHT);
   bool footLeftNow = (digitalRead(FOOT_SENSOR_LEFT) == LOW);
   bool footRightNow = (digitalRead(FOOT_SENSOR_RIGHT) == LOW);
-  
+
   // Check if we're in the "ready" state where foot sensor LED feedback should be active
   bool inReadyState = !isPlayingAudio && !isPlayingFalseStart && !isTimerRunning;
-  
+
   // During audio sequence, track if either foot sensor is released (false start)
   // Only check for false starts on active sensors based on mode
   if (isPlayingAudio && !isPlayingFalseStart) {
@@ -222,14 +398,14 @@ void checkButtons() {
         leftFalseStart = true;
         falseStartOccurred = true;
         leftFalseStartTime = millis();
-        setLeftLEDs(CRGB::Red); // Turn on red LEDs for left false start
+        setLeftLEDs(CRGB::Red);  // Turn on red LEDs for left false start
       }
       if (footRightPressed && !footRightNow && rightFootValidDuringAudio) {
         rightFootValidDuringAudio = false;
         rightFalseStart = true;
         falseStartOccurred = true;
         rightFalseStartTime = millis();
-        setRightLEDs(CRGB::Red); // Turn on red LEDs for right false start
+        setRightLEDs(CRGB::Red);  // Turn on red LEDs for right false start
       }
     } else {
       // Competition mode: check both sensors
@@ -238,34 +414,34 @@ void checkButtons() {
         leftFalseStart = true;
         falseStartOccurred = true;
         leftFalseStartTime = millis();
-        setLeftLEDs(CRGB::Red); // Turn on red LEDs for left false start
+        setLeftLEDs(CRGB::Red);  // Turn on red LEDs for left false start
       }
       if (!footRightNow && rightFootValidDuringAudio) {
         rightFootValidDuringAudio = false;
         rightFalseStart = true;
         falseStartOccurred = true;
         rightFalseStartTime = millis();
-        setRightLEDs(CRGB::Red); // Turn on red LEDs for right false start
+        setRightLEDs(CRGB::Red);  // Turn on red LEDs for right false start
       }
     }
   }
-  
+
   // Handle foot sensor left state changes
   if (footLeftNow && !footLeftPressed) {
     footLeftPressed = true;
-    
+
     // LED feedback only during ready state
     if (inReadyState) {
       setLeftLEDs(CRGB::Green);
     }
   } else if (!footLeftNow && footLeftPressed) {
     footLeftPressed = false;
-    
+
     // LED feedback only during ready state
     if (inReadyState) {
-      setLeftLEDs(CRGB::Black); // Turn off LEDs
+      setLeftLEDs(CRGB::Black);  // Turn off LEDs
     }
-    
+
     // Calculate reaction time whenever foot is released after we have an audioEndTime
     if (audioEndTime > 0 && reactionTimeLeft == 0 && !leftFalseStart) {
       // Normal reaction time - foot released after audio ended
@@ -273,23 +449,23 @@ void checkButtons() {
       sendWebSocketUpdate();
     }
   }
-  
+
   // Handle foot sensor right state changes
   if (footRightNow && !footRightPressed) {
     footRightPressed = true;
-    
+
     // LED feedback only during ready state
     if (inReadyState) {
       setRightLEDs(CRGB::Green);
     }
   } else if (!footRightNow && footRightPressed) {
     footRightPressed = false;
-    
+
     // LED feedback only during ready state
     if (inReadyState) {
-      setRightLEDs(CRGB::Black); // Turn off LEDs
+      setRightLEDs(CRGB::Black);  // Turn off LEDs
     }
-    
+
     // Calculate reaction time whenever foot is released after we have an audioEndTime
     if (audioEndTime > 0 && reactionTimeRight == 0 && !rightFalseStart) {
       // Normal reaction time - foot released after audio ended
@@ -297,7 +473,7 @@ void checkButtons() {
       sendWebSocketUpdate();
     }
   }
-  
+
   // Handle start button
   if (startPressed && !startButtonPressed) {
     startButtonPressed = true;
@@ -305,30 +481,30 @@ void checkButtons() {
   } else if (!startPressed) {
     startButtonPressed = false;
   }
-  
+
   // Handle stop sensor left
   if (stopLeftNow && !stopLeftPressed) {
     stopLeftPressed = true;
-    handleStopSensor(true); // true for left side
+    handleStopSensor(true);  // true for left side
   } else if (!stopLeftNow) {
     stopLeftPressed = false;
   }
-  
+
   // Handle stop sensor right
   if (stopRightNow && !stopRightPressed) {
     stopRightPressed = true;
-    handleStopSensor(false); // false for right side
+    handleStopSensor(false);  // false for right side
   } else if (!stopRightNow) {
     stopRightPressed = false;
   }
-  
+
   lastButtonCheck = millis();
 }
 
 void handleStartButton() {
   // Check if we're in ready-to-start state
   bool canStart = false;
-  
+
   if (singlePlayerMode) {
     // Single player: allow if at least one foot sensor is pressed
     canStart = (footLeftPressed || footRightPressed) && !isPlayingAudio && !isPlayingFalseStart && !isTimerRunning;
@@ -336,7 +512,7 @@ void handleStartButton() {
     // Competition mode: require BOTH foot sensors
     canStart = footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart && !isTimerRunning;
   }
-  
+
   if (canStart) {
     // Start the competition
     falseStartOccurred = false;
@@ -345,8 +521,8 @@ void handleStartButton() {
     leftFootValidDuringAudio = true;
     rightFootValidDuringAudio = true;
     falseStartAudioPlayed = false;
-    leftFalseStartTime = 0; // Reset false start times
-    rightFalseStartTime = 0; // Reset false start times
+    leftFalseStartTime = 0;   // Reset false start times
+    rightFalseStartTime = 0;  // Reset false start times
     reactionTimeLeft = 0;
     reactionTimeRight = 0;
     completionTimeLeft = 0;
@@ -374,7 +550,7 @@ void handleStopSensor(bool isLeft) {
   if (isTimerRunning) {
     // MODIFIED: Always record completion times, regardless of false start status
     unsigned long completionTime = millis() - timerStartTime;
-    
+
     if (isLeft && !leftFinished) {
       completionTimeLeft = completionTime;
       leftFinished = true;
@@ -382,7 +558,7 @@ void handleStopSensor(bool isLeft) {
       completionTimeRight = completionTime;
       rightFinished = true;
     }
-    
+
     // NEW: Determine winner immediately when first person finishes
     if ((leftFinished || rightFinished) && !falseStartOccurred) {
       // No false starts - first to finish wins
@@ -427,12 +603,12 @@ void handleStopSensor(bool isLeft) {
       }
       // If both false started, no winner - both stay red
     }
-    
+
     // Stop timer when both competitors finish (regardless of false starts)
     if (leftFinished && rightFinished) {
       stopTimer();
     }
-    
+
     sendWebSocketUpdate();
   }
 }
@@ -441,7 +617,7 @@ void startAudioSequence() {
   isPlayingAudio = true;
   currentAudioStep = 0;
   audioStepStartTime = millis();
-  
+
   // Start first step immediately
   if (audioSequence[0].frequency > 0) {
     playTone(audioSequence[0].frequency);
@@ -454,7 +630,7 @@ void startFalseStartSequence() {
   isPlayingFalseStart = true;
   currentAudioStep = 0;
   audioStepStartTime = millis();
-  
+
   // Start first step immediately
   if (falseStartSequence[0].frequency > 0) {
     playTone(falseStartSequence[0].frequency);
@@ -465,25 +641,25 @@ void startFalseStartSequence() {
 
 void updateAudioSequence() {
   if (!isPlayingAudio && !isPlayingFalseStart) return;
-  
+
   unsigned long currentTime = millis();
   unsigned long elapsed = currentTime - audioStepStartTime;
-  
+
   // Choose the correct sequence based on what's playing
   const AudioStep* sequence = isPlayingAudio ? audioSequence : falseStartSequence;
   int sequenceLength = isPlayingAudio ? AUDIO_SEQUENCE_LENGTH : FALSE_START_SEQUENCE_LENGTH;
-  
+
   // Check if current step is complete
   if (elapsed >= sequence[currentAudioStep].duration) {
     currentAudioStep++;
-    
+
     // Check if sequence is complete
     if (currentAudioStep >= sequenceLength) {
       // Sequence complete
       stopTone();
       if (isPlayingAudio) {
         isPlayingAudio = false;
-        audioEndTime = millis(); // Record when audio ended
+        audioEndTime = millis();  // Record when audio ended
         // Don't turn off LEDs here - let completeAudioSequence() handle LED state
         completeAudioSequence();
       } else if (isPlayingFalseStart) {
@@ -493,12 +669,12 @@ void updateAudioSequence() {
       currentAudioStep = 0;
       return;
     }
-    
+
     // Start next step
     audioStepStartTime = currentTime;
     if (sequence[currentAudioStep].frequency > 0) {
       playTone(sequence[currentAudioStep].frequency);
-      
+
       // Handle LED control based on audio frequency
       if (isPlayingAudio) {
         // Main audio sequence: 880Hz and 1760Hz = green, 0Hz = blank
@@ -510,7 +686,7 @@ void updateAudioSequence() {
           } else {
             setLeftLEDs(CRGB::Green);
           }
-          
+
           // Right LED: green if no false start, red if false start occurred
           if (rightFalseStart) {
             setRightLEDs(CRGB::Red);
@@ -538,7 +714,7 @@ void updateAudioSequence() {
       }
     } else {
       stopTone();
-      
+
       // Handle LED control for silence (0Hz)
       if (isPlayingAudio) {
         // MODIFIED: During silence, keep false start lanes red, turn off valid lanes
@@ -547,7 +723,7 @@ void updateAudioSequence() {
         } else {
           setLeftLEDs(CRGB::Black);  // Turn off for valid competitor
         }
-        
+
         if (rightFalseStart) {
           setRightLEDs(CRGB::Red);  // Keep red for false start
         } else {
@@ -570,10 +746,9 @@ void updateAudioSequence() {
   }
 }
 
-
 void playTone(int frequency) {
   ledcChangeFrequency(AUDIO_PIN, frequency, LEDC_RESOLUTION);
-  ledcWrite(AUDIO_PIN, 128); // 50% duty cycle for square wave
+  ledcWrite(AUDIO_PIN, 128);  // 50% duty cycle for square wave
 }
 
 void stopTone() {
@@ -583,34 +758,34 @@ void stopTone() {
 void completeAudioSequence() {
   isPlayingAudio = false;
   currentAudioStep = 0;
-  audioEndTime = millis(); // Record when audio ended
-  
+  audioEndTime = millis();  // Record when audio ended
+
   // Calculate negative reaction times for false starts
   if (leftFalseStart && leftFalseStartTime > 0) {
     // Calculate how early they started (negative reaction time)
-    reactionTimeLeft = (long)leftFalseStartTime - (long)audioEndTime; // This will be negative
+    reactionTimeLeft = (long)leftFalseStartTime - (long)audioEndTime;  // This will be negative
   }
   if (rightFalseStart && rightFalseStartTime > 0) {
     // Calculate how early they started (negative reaction time)
-    reactionTimeRight = (long)rightFalseStartTime - (long)audioEndTime; // This will be negative
+    reactionTimeRight = (long)rightFalseStartTime - (long)audioEndTime;  // This will be negative
   }
-  
+
   // FIXED: Always start timer immediately when audio sequence completes
   startTimer();
-  
+
   // Play false start beep AFTER starting timer (doesn't delay valid competitor)
   if (falseStartOccurred && !falseStartAudioPlayed) {
     falseStartAudioPlayed = true;
     startFalseStartSequence();
   }
-  
-  sendWebSocketUpdate(); // Immediate update when audio completes
+
+  sendWebSocketUpdate();  // Immediate update when audio completes
 }
 
 void completeFalseStartSequence() {
   isPlayingFalseStart = false;
   currentAudioStep = 0;
-  
+
   // Keep false start lanes red after sequence completes
   if (leftFalseStart) {
     setLeftLEDs(CRGB::Red);
@@ -625,22 +800,22 @@ void completeFalseStartSequence() {
   if (!rightFalseStart) {
     setRightLEDs(CRGB::Black);
   }
-  
+
   // Timer is already running from when main audio completed - no need to start it again
-  
-  sendWebSocketUpdate(); // Immediate update when false start sequence completes
+
+  sendWebSocketUpdate();  // Immediate update when false start sequence completes
 }
 
 void startTimer() {
   isTimerRunning = true;
   timerStartTime = millis();
-  sendWebSocketUpdate(); // Immediate update when timer starts
+  sendWebSocketUpdate();  // Immediate update when timer starts
 }
 
 void stopTimer() {
   isTimerRunning = false;
   currentElapsedTime = millis() - timerStartTime;
-  sendWebSocketUpdate(); // Immediate update when timer stops
+  sendWebSocketUpdate();  // Immediate update when timer stops
 }
 
 void resetTimer() {
@@ -653,8 +828,8 @@ void resetTimer() {
   leftFootValidDuringAudio = true;
   rightFootValidDuringAudio = true;
   falseStartAudioPlayed = false;
-  leftFalseStartTime = 0; // Reset false start times
-  rightFalseStartTime = 0; // Reset false start times
+  leftFalseStartTime = 0;   // Reset false start times
+  rightFalseStartTime = 0;  // Reset false start times
   reactionTimeLeft = 0;
   reactionTimeRight = 0;
   completionTimeLeft = 0;
@@ -662,11 +837,11 @@ void resetTimer() {
   leftFinished = false;
   rightFinished = false;
   audioEndTime = 0;
-  
+
   // Turn off all LEDs when reset
   turnOffAllLEDs();
-  
-  sendWebSocketUpdate(); // Immediate update when timer resets
+
+  sendWebSocketUpdate();  // Immediate update when timer resets
 }
 
 void updateTimer() {
@@ -675,12 +850,12 @@ void updateTimer() {
   }
 }
 
-void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
-  switch(type) {
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
     case WStype_DISCONNECTED:
       Serial.printf("WebSocket client #%u disconnected\n", num);
       break;
-      
+
     case WStype_CONNECTED:
       {
         IPAddress ip = webSocket.remoteIP(num);
@@ -689,15 +864,15 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
         sendWebSocketUpdate();
       }
       break;
-      
+
     case WStype_TEXT:
       {
         String command = String((char*)payload);
         Serial.printf("WebSocket received: %s\n", command.c_str());
-        
+
         if (command == "start") {
           bool canStart = false;
-          
+
           if (singlePlayerMode) {
             // Single player: allow if at least one foot sensor is pressed
             canStart = (footLeftPressed || footRightPressed) && !isPlayingAudio && !isPlayingFalseStart;
@@ -705,7 +880,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
             // Competition mode: require BOTH foot sensors
             canStart = footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart;
           }
-          
+
           if (canStart) {
             falseStartOccurred = false;
             leftFalseStart = false;
@@ -713,8 +888,8 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
             leftFootValidDuringAudio = true;
             rightFootValidDuringAudio = true;
             falseStartAudioPlayed = false;
-            leftFalseStartTime = 0; // Reset false start times
-            rightFalseStartTime = 0; // Reset false start times
+            leftFalseStartTime = 0;   // Reset false start times
+            rightFalseStartTime = 0;  // Reset false start times
             reactionTimeLeft = 0;
             reactionTimeRight = 0;
             completionTimeLeft = 0;
@@ -742,10 +917,10 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
         } else if (command == "toggle_mode") {
           singlePlayerMode = !singlePlayerMode;
         }
-        sendWebSocketUpdate(); // Send immediate update after command
+        sendWebSocketUpdate();  // Send immediate update after command
       }
       break;
-      
+
     default:
       break;
   }
@@ -765,9 +940,9 @@ void sendWebSocketUpdate() {
   if (isTimerRunning) {
     currentElapsedTime = millis() - timerStartTime;
   }
-  
+
   DynamicJsonDocument doc(1024);
-  
+
   doc["is_timer_running"] = isTimerRunning;
   doc["is_playing_audio"] = isPlayingAudio;
   doc["is_playing_false_start"] = isPlayingFalseStart;
@@ -775,36 +950,50 @@ void sendWebSocketUpdate() {
   doc["left_false_start"] = leftFalseStart;
   doc["right_false_start"] = rightFalseStart;
   doc["single_player_mode"] = singlePlayerMode;
-  
+
   // Foot sensor states
   doc["foot_left_pressed"] = footLeftPressed;
   doc["foot_right_pressed"] = footRightPressed;
   doc["both_feet_ready"] = footLeftPressed && footRightPressed;
   doc["ready_to_start"] = singlePlayerMode ? (footLeftPressed || footRightPressed) : (footLeftPressed && footRightPressed);
-  
+
   // Timing data
   doc["elapsed_time"] = currentElapsedTime;
   doc["formatted_time"] = formatTime(currentElapsedTime);
-  
+
   // Left side data (including negative reaction times)
   doc["reaction_time_left"] = reactionTimeLeft;
   doc["formatted_reaction_time_left"] = formatSignedTime(reactionTimeLeft);
   doc["completion_time_left"] = completionTimeLeft;
   doc["formatted_completion_time_left"] = formatTime(completionTimeLeft);
   doc["left_finished"] = leftFinished;
-  
+
   // Right side data (including negative reaction times)
   doc["reaction_time_right"] = reactionTimeRight;
   doc["formatted_reaction_time_right"] = formatSignedTime(reactionTimeRight);
   doc["completion_time_right"] = completionTimeRight;
   doc["formatted_completion_time_right"] = formatTime(completionTimeRight);
   doc["right_finished"] = rightFinished;
-  
+
+  doc["leaderboard_count"] = leaderboardCount;
+  // Check if current times would be new records (only for valid finishers)
+  if (completionTimeLeft > 0 && !leftFalseStart) {
+    doc["left_is_record"] = isNewRecord(completionTimeLeft);
+  } else {
+    doc["left_is_record"] = false;
+  }
+
+  if (completionTimeRight > 0 && !rightFalseStart) {
+    doc["right_is_record"] = isNewRecord(completionTimeRight);
+  } else {
+    doc["right_is_record"] = false;
+  }
+
   doc["uptime"] = millis();
-  
+
   String message;
   serializeJson(doc, message);
-  
+
   webSocket.broadcastTXT(message);
 }
 
@@ -813,7 +1002,7 @@ String formatTime(unsigned long milliseconds) {
   unsigned long ms = milliseconds % 1000;
   unsigned long seconds = totalSeconds % 60;
   unsigned long minutes = totalSeconds / 60;
-  
+
   char timeStr[16];
   sprintf(timeStr, "%lu:%02lu.%03lu", minutes, seconds, ms);
   return String(timeStr);
@@ -824,16 +1013,16 @@ String formatSignedTime(long milliseconds) {
   if (milliseconds == 0) {
     return "0:00.000";
   }
-  
+
   bool isNegative = milliseconds < 0;
   unsigned long absMilliseconds = abs(milliseconds);
-  
+
   unsigned long totalSeconds = absMilliseconds / 1000;
   unsigned long ms = absMilliseconds % 1000;
   unsigned long seconds = totalSeconds % 60;
   unsigned long minutes = totalSeconds / 60;
-  
-  char timeStr[17]; // Extra space for minus sign
+
+  char timeStr[17];  // Extra space for minus sign
   if (isNegative) {
     sprintf(timeStr, "-%lu:%02lu.%03lu", minutes, seconds, ms);
   } else {
@@ -861,6 +1050,69 @@ void handleRoot() {
       background: linear-gradient(135deg, #43B75C 0%, #2E8B57 100%);
       color: white;
       min-height: 100vh;
+    }
+    .leaderboard {
+      background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.08));
+      padding: 20px;
+      border-radius: 12px;
+      margin: 25px 0;
+      grid-column: 1 / -1;
+      border: 1px solid rgba(255,255,255,0.25);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+    }
+
+    .leaderboard-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+
+    .leaderboard-table th, .leaderboard-table td {
+      padding: 8px 12px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255,255,255,0.2);
+    }
+
+    .leaderboard-table th {
+      background: rgba(255,255,255,0.1);
+      font-weight: bold;
+    }
+
+    .leaderboard-table tr:hover {
+      background: rgba(255,255,255,0.05);
+    }
+
+    .record-popup {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.8);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+
+    .record-popup-content {
+      background: linear-gradient(135deg, #43B75C 0%, #2E8B57 100%);
+      padding: 30px;
+      border-radius: 15px;
+      text-align: center;
+      max-width: 400px;
+      border: 2px solid gold;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+
+    .record-popup input {
+      width: 100%;
+      padding: 10px;
+      margin: 15px 0;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      text-align: center;
     }
     .container {
       background: rgba(255,255,255,0.1);
@@ -1096,6 +1348,35 @@ void handleRoot() {
         </span>
       </div>
     </div>
+    <div class='leaderboard'>
+  <h3>🏆 Top 10 Records</h3>
+  <button onclick='clearLeaderboard()' style='float: right; padding: 8px 16px; font-size: 12px;'>Clear All</button>
+  <table class='leaderboard-table' id='leaderboard-table'>
+    <thead>
+      <tr>
+        <th>Rank</th>
+        <th>Name</th>
+        <th>Time</th>
+        <th>Date</th>
+      </tr>
+    </thead>
+    <tbody id='leaderboard-body'>
+      <tr><td colspan='4' style='text-align: center;'>Loading...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div id='recordPopup' class='record-popup'>
+  <div class='record-popup-content'>
+    <h2>🎉 NEW RECORD! 🎉</h2>
+    <p id='recordTime'></p>
+    <p>Enter your name:</p>
+    <input type='text' id='recordName' maxlength='20' placeholder='Your name here'>
+    <br>
+    <button onclick='saveRecord()'>Save Record</button>
+    <button onclick='closeRecordPopup()'>Skip</button>
+  </div>
+</div>
   </div>
 
   <script>
@@ -1103,7 +1384,7 @@ void handleRoot() {
     function connectWebSocket() {
       const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(protocol + '://' + location.hostname + ':81');
-      ws.onopen = function() { console.log('WebSocket connected'); };
+      ws.onopen = function() { console.log('WebSocket connected'); loadLeaderboard(); };
       ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
         
@@ -1373,6 +1654,9 @@ void handleRoot() {
           }
           startBtn.disabled = !data.ready_to_start;
         }
+		if (!data.is_timer_running && !data.is_playing_audio && !data.is_playing_false_start) {
+			checkForNewRecord(data);
+		  }
       };
       ws.onclose = function() { console.log('WebSocket disconnected'); setTimeout(connectWebSocket, 3000); };
       ws.onerror = function(error) { console.log('WebSocket error:', error); };
@@ -1383,6 +1667,96 @@ void handleRoot() {
     function toggleMode() { ws.send('toggle_mode'); }
 
     connectWebSocket();
+
+let pendingRecord = null;
+
+function loadLeaderboard() {
+  fetch('/api/leaderboard')
+    .then(response => response.json())
+    .then(data => {
+      const tbody = document.getElementById('leaderboard-body');
+      if (data.entries && data.entries.length > 0) {
+        tbody.innerHTML = data.entries.map(entry => `
+          <tr>
+            <td>#${entry.rank}</td>
+            <td>${entry.name}</td>
+            <td>${entry.formatted_time}</td>
+            <td>${entry.date}</td>
+          </tr>
+        `).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">No records yet</td></tr>';
+      }
+    })
+    .catch(error => {
+      console.error('Error loading leaderboard:', error);
+      document.getElementById('leaderboard-body').innerHTML = '<tr><td colspan="4" style="text-align: center;">Error loading records</td></tr>';
+    });
+}
+
+function checkForNewRecord(data) {
+  // Check if either player achieved a new record
+  if (data.left_is_record && data.completion_time_left > 0 && !data.left_false_start) {
+    showRecordPopup(data.completion_time_left, data.formatted_completion_time_left, 'left');
+  } else if (data.right_is_record && data.completion_time_right > 0 && !data.right_false_start) {
+    showRecordPopup(data.completion_time_right, data.formatted_completion_time_right, 'right');
+  }
+}
+
+function showRecordPopup(timeMs, formattedTime, side) {
+  pendingRecord = { timeMs, formattedTime };
+  document.getElementById('recordTime').textContent = `Amazing time: ${formattedTime}`;
+  document.getElementById('recordName').value = '';
+  document.getElementById('recordPopup').style.display = 'flex';
+  document.getElementById('recordName').focus();
+}
+
+function saveRecord() {
+  const name = document.getElementById('recordName').value.trim();
+  if (!name) {
+    alert('Please enter your name');
+    return;
+  }
+  
+  if (!pendingRecord) return;
+  
+  const formData = new FormData();
+  formData.append('name', name);
+  formData.append('time_ms', pendingRecord.timeMs);
+  formData.append('formatted_time', pendingRecord.formattedTime);
+  
+  fetch('/api/leaderboard', {
+    method: 'POST',
+    body: formData
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.status) {
+      closeRecordPopup();
+      loadLeaderboard();
+    } else {
+      alert('Error saving record: ' + (data.error || 'Unknown error'));
+    }
+  })
+  .catch(error => {
+    console.error('Error saving record:', error);
+    alert('Error saving record');
+  });
+}
+
+function closeRecordPopup() {
+  document.getElementById('recordPopup').style.display = 'none';
+  pendingRecord = null;
+}
+
+function clearLeaderboard() {
+  if (confirm('Are you sure you want to clear all records? This cannot be undone.')) {
+    fetch('/api/leaderboard', { method: 'DELETE' })
+      .then(() => loadLeaderboard())
+      .catch(error => console.error('Error clearing leaderboard:', error));
+  }
+}
+
   </script>
 </body>
 </html>
@@ -1393,7 +1767,7 @@ void handleRoot() {
 
 void handleApiStatus() {
   DynamicJsonDocument doc(1024);
-  
+
   doc["is_timer_running"] = isTimerRunning;
   doc["is_playing_audio"] = isPlayingAudio;
   doc["is_playing_false_start"] = isPlayingFalseStart;
@@ -1401,42 +1775,42 @@ void handleApiStatus() {
   doc["left_false_start"] = leftFalseStart;
   doc["right_false_start"] = rightFalseStart;
   doc["single_player_mode"] = singlePlayerMode;
-  
+
   // Foot sensor states
   doc["foot_left_pressed"] = footLeftPressed;
   doc["foot_right_pressed"] = footRightPressed;
   doc["both_feet_ready"] = footLeftPressed && footRightPressed;
   doc["ready_to_start"] = singlePlayerMode ? (footLeftPressed || footRightPressed) : (footLeftPressed && footRightPressed);
-  
+
   // Timing data
   doc["elapsed_time"] = currentElapsedTime;
   doc["formatted_time"] = formatTime(currentElapsedTime);
-  
+
   // Left side data (including negative reaction times)
   doc["reaction_time_left"] = reactionTimeLeft;
   doc["formatted_reaction_time_left"] = formatSignedTime(reactionTimeLeft);
   doc["completion_time_left"] = completionTimeLeft;
   doc["formatted_completion_time_left"] = formatTime(completionTimeLeft);
   doc["left_finished"] = leftFinished;
-  
+
   // Right side data (including negative reaction times)
   doc["reaction_time_right"] = reactionTimeRight;
   doc["formatted_reaction_time_right"] = formatSignedTime(reactionTimeRight);
   doc["completion_time_right"] = completionTimeRight;
   doc["formatted_completion_time_right"] = formatTime(completionTimeRight);
   doc["right_finished"] = rightFinished;
-  
+
   doc["uptime"] = millis();
-  
+
   String response;
   serializeJson(doc, response);
-  
+
   server.send(200, "application/json", response);
 }
 
 void handleApiStart() {
   bool canStart = false;
-  
+
   if (singlePlayerMode) {
     // Single player: allow if at least one foot sensor is pressed
     canStart = (footLeftPressed || footRightPressed) && !isPlayingAudio && !isPlayingFalseStart;
@@ -1444,7 +1818,7 @@ void handleApiStart() {
     // Competition mode: require BOTH foot sensors
     canStart = footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart;
   }
-  
+
   if (canStart) {
     falseStartOccurred = false;
     leftFalseStart = false;
@@ -1452,8 +1826,8 @@ void handleApiStart() {
     leftFootValidDuringAudio = true;
     rightFootValidDuringAudio = true;
     falseStartAudioPlayed = false;
-    leftFalseStartTime = 0; // Reset false start times
-    rightFalseStartTime = 0; // Reset false start times
+    leftFalseStartTime = 0;   // Reset false start times
+    rightFalseStartTime = 0;  // Reset false start times
     reactionTimeLeft = 0;
     reactionTimeRight = 0;
     completionTimeLeft = 0;
