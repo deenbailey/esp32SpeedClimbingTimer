@@ -23,8 +23,8 @@ CRGB ledsLeft[NUM_LEDS_PER_STRIP];
 CRGB ledsRight[NUM_LEDS_PER_STRIP];
 
 // ================== WiFi Config ==================
-const char* ssid = "Nacho WiFi";
-const char* password = "airforce11";
+const char* ssid = "IPY6J60VPXF0";
+const char* password = "password133";
 
 // ================== Audio Config ==================
 #define LEDC_CHANNEL     0
@@ -442,6 +442,9 @@ void startAudioSequence() {
   currentAudioStep = 0;
   audioStepStartTime = millis();
   
+  setLeftLEDs(CRGB::Black);
+  setRightLEDs(CRGB::Black);
+
   // Start first step immediately
   if (audioSequence[0].frequency > 0) {
     playTone(audioSequence[0].frequency);
@@ -853,58 +856,69 @@ void handleRoot() {
   <meta charset="UTF-8">
   <meta name='viewport' content='width=device-width, initial-scale=1'>
   <style>
+    * {
+      box-sizing: border-box;
+    }
+    
     body {
       font-family: Arial, sans-serif;
       max-width: 800px;
       margin: 0 auto;
-      padding: 20px;
+      padding: 10px;
       background: linear-gradient(135deg, #43B75C 0%, #2E8B57 100%);
       color: white;
       min-height: 100vh;
     }
+    
     .container {
       background: rgba(255,255,255,0.1);
-      padding: 30px;
+      padding: 15px;
       border-radius: 15px;
       backdrop-filter: blur(10px);
       box-shadow: 0 8px 32px rgba(0,0,0,0.1);
     }
+    
     .competition-layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 30px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
       margin: 20px 0;
     }
+    
     .climber-panel {
       background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
-      padding: 25px;
+      padding: 20px;
       border-radius: 15px;
       text-align: center;
       border: 1px solid rgba(255,255,255,0.2);
       box-shadow: 0 8px 25px rgba(0,0,0,0.15);
     }
+    
     .timer-display {
-      font-size: 3.8em;
+      font-size: 2.5em;
       font-weight: bold;
-      margin: 25px 0;
+      margin: 20px 0;
       text-shadow: 3px 3px 6px rgba(0,0,0,0.6);
       background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.08));
-      padding: 25px;
+      padding: 20px;
       border-radius: 15px;
       border: 1px solid rgba(255,255,255,0.3);
       box-shadow: inset 0 2px 10px rgba(0,0,0,0.2);
+      word-break: break-all;
     }
+    
     .status {
       text-align: center;
       margin: 20px 0;
-      font-size: 1.2em;
+      font-size: 1.1em;
       padding: 15px;
       border-radius: 10px;
-      grid-column: 1 / -1;
       background: rgba(0,100,0,0.7);
       border: 2px solid rgba(255,255,255,0.2);
       box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      word-wrap: break-word;
     }
+    
     .running { 
       background: linear-gradient(135deg, rgba(0,150,0,0.8), rgba(0,100,0,0.9));
       animation: pulse-green 2s ease-in-out infinite alternate;
@@ -921,6 +935,7 @@ void handleRoot() {
       border: 2px solid #dc2626;
       animation: pulse-red 0.5s ease-in-out infinite alternate;
     }
+    
     @keyframes pulse-green {
       from { box-shadow: 0 4px 15px rgba(0,150,0,0.4); }
       to { box-shadow: 0 6px 25px rgba(0,150,0,0.7); }
@@ -933,11 +948,13 @@ void handleRoot() {
       from { box-shadow: 0 4px 15px rgba(220,38,38,0.6); }
       to { box-shadow: 0 8px 30px rgba(220,38,38,0.9); }
     }
+    
     .disqualified { 
       opacity: 0.8; 
       background: rgba(220,38,38,0.2) !important;
       border: 2px solid #dc2626 !important;
     }
+    
     .foot-sensor {
       padding: 12px;
       border-radius: 8px;
@@ -945,6 +962,7 @@ void handleRoot() {
       margin: 12px 0;
       border: 1px solid rgba(255,255,255,0.2);
       transition: all 0.3s ease;
+      font-size: 0.9em;
     }
     .foot-pressed { 
       background: linear-gradient(135deg, rgba(34,197,94,0.4), rgba(22,163,74,0.5)); 
@@ -954,11 +972,12 @@ void handleRoot() {
       background: linear-gradient(135deg, rgba(239,68,68,0.4), rgba(220,38,38,0.5)); 
       box-shadow: 0 4px 15px rgba(239,68,68,0.3);
     }
+    
     .reaction-time, .completion-time {
       padding: 10px;
       border-radius: 8px;
       margin: 8px 0;
-      font-size: 0.9em;
+      font-size: 0.85em;
       border: 1px solid rgba(255,255,255,0.2);
       transition: all 0.3s ease;
     }
@@ -976,6 +995,7 @@ void handleRoot() {
       background: linear-gradient(135deg, rgba(34,197,94,0.3), rgba(22,163,74,0.4)); 
       box-shadow: 0 3px 12px rgba(34,197,94,0.2);
     }
+    
     .winner { 
       background: rgba(255,215,0,0.3) !important; 
       border: 2px solid gold;
@@ -985,23 +1005,27 @@ void handleRoot() {
       from { box-shadow: 0 0 10px rgba(255,215,0,0.5); }
       to { box-shadow: 0 0 20px rgba(255,215,0,0.8); }
     }
+    
     button {
       background: linear-gradient(135deg, rgba(255,255,255,0.25), rgba(255,255,255,0.15));
       color: white;
       border: 2px solid rgba(255,255,255,0.4);
-      padding: 15px 30px;
-      margin: 8px;
+      padding: 12px 20px;
+      margin: 6px;
       border-radius: 12px;
       cursor: pointer;
-      font-size: 16px;
+      font-size: 14px;
       font-weight: bold;
       transition: all 0.3s ease;
       text-shadow: 0 1px 2px rgba(0,0,0,0.3);
       box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      min-height: 44px; /* Touch-friendly minimum */
+      width: 100%;
+      max-width: 200px;
     }
     button:hover { 
       background: linear-gradient(135deg, rgba(255,255,255,0.35), rgba(255,255,255,0.25)); 
-      transform: translateY(-3px); 
+      transform: translateY(-2px); 
       box-shadow: 0 6px 20px rgba(0,0,0,0.3);
     }
     button:disabled { 
@@ -1010,7 +1034,16 @@ void handleRoot() {
       transform: none; 
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
-    .button-group { text-align: center; margin: 20px 0; grid-column: 1 / -1; }
+    
+    .button-group { 
+      text-align: center; 
+      margin: 20px 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    
     .mode-toggle {
       background: rgba(255,255,255,0.15);
       border: 2px solid rgba(255,255,255,0.4);
@@ -1021,10 +1054,9 @@ void handleRoot() {
       position: relative;
       overflow: hidden;
       transition: all 0.4s ease;
-      margin: 15px auto;
-      display: block;
-      width: fit-content;
       text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+      width: 100%;
+      max-width: 240px;
     }
     .mode-toggle.single-mode {
       background: linear-gradient(135deg, #ff6b6b, #ff8e8e);
@@ -1037,20 +1069,142 @@ void handleRoot() {
       box-shadow: 0 6px 20px rgba(76, 175, 80, 0.5);
     }
     .mode-toggle:hover {
-      transform: translateY(-3px) scale(1.02);
+      transform: translateY(-2px) scale(1.02);
       box-shadow: 0 8px 25px rgba(255,255,255,0.3);
     }
-    h1 { text-align: center; margin-bottom: 30px; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
-    h2 { margin-top: 0; }
+    
+    h1 { 
+      text-align: center; 
+      margin-bottom: 20px; 
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+      font-size: 1.8em;
+    }
+    
+    h2 { 
+      margin-top: 0;
+      font-size: 1.3em;
+    }
+    
     .instructions { 
       background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.08)); 
-      padding: 20px; 
+      padding: 15px; 
       border-radius: 12px; 
-      margin: 25px 0; 
-      grid-column: 1 / -1;
-      font-size: 0.9em;
+      margin: 20px 0; 
+      font-size: 0.85em;
       border: 1px solid rgba(255,255,255,0.25);
       box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+      line-height: 1.4;
+    }
+    
+    /* Desktop view - side by side layout */
+    @media (min-width: 768px) {
+      body {
+        padding: 20px;
+      }
+      
+      .container {
+        padding: 30px;
+      }
+      
+      .competition-layout {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 30px;
+      }
+      
+      .status {
+        grid-column: 1 / -1;
+        font-size: 1.2em;
+      }
+      
+      .button-group {
+        grid-column: 1 / -1;
+        flex-direction: row;
+        justify-content: center;
+      }
+      
+      .instructions {
+        grid-column: 1 / -1;
+        font-size: 0.9em;
+      }
+      
+      .timer-display {
+        font-size: 3.6em;
+        padding: 25px;
+      }
+      
+      .climber-panel {
+        padding: 25px;
+      }
+      
+      h1 {
+        font-size: 2.2em;
+        margin-bottom: 30px;
+      }
+      
+      h2 {
+        font-size: 1.5em;
+      }
+      
+      button {
+        width: auto;
+        padding: 15px 30px;
+        font-size: 16px;
+      }
+      
+      .mode-toggle {
+        width: auto;
+      }
+    }
+    
+    /* Large desktop view */
+    @media (min-width: 1024px) {
+      .timer-display {
+        font-size: 3.6em;
+      }
+      
+      h1 {
+        font-size: 2.5em;
+      }
+    }
+    
+    /* Very small mobile devices */
+    @media (max-width: 360px) {
+      body {
+        padding: 5px;
+      }
+      
+      .container {
+        padding: 10px;
+      }
+      
+      .timer-display {
+        font-size: 2em;
+        padding: 15px;
+        margin: 15px 0;
+      }
+      
+      h1 {
+        font-size: 1.5em;
+      }
+      
+      h2 {
+        font-size: 1.1em;
+      }
+      
+      .instructions {
+        font-size: 0.8em;
+        padding: 12px;
+      }
+      
+      button {
+        font-size: 13px;
+        padding: 10px 16px;
+      }
+      
+      .climber-panel {
+        padding: 15px;
+      }
     }
   </style>
 </head>
@@ -1125,7 +1279,7 @@ void handleRoot() {
           }
         } else {
           // In single player mode and left foot not active - show inactive state
-          leftTimer.textContent = '---';
+          leftTimer.textContent = '0:00.000';
           leftTimer.style.background = 'rgba(100,100,100,0.2)'; // Gray background for inactive
         }
         
@@ -1143,7 +1297,7 @@ void handleRoot() {
           }
         } else {
           // In single player mode and right foot not active - show inactive state
-          rightTimer.textContent = '---';
+          rightTimer.textContent = '0:00.000';
           rightTimer.style.background = 'rgba(100,100,100,0.2)'; // Gray background for inactive
         }
         
