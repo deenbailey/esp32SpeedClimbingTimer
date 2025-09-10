@@ -102,9 +102,30 @@ bool falseStartAudioPlayed = false;        // Ensure false start audio only play
 bool singlePlayerMode = true;              // New: Single player mode toggle
 unsigned long audioSequenceStartTime = 0;  // Track when the entire audio sequence started
 
+// STATE Manager variables
+bool lastTimerRunning = false;
+bool lastPlayingAudio = false;
+bool lastPlayingFalseStart = false;
+bool lastFalseStartOccurred = false;
+bool lastLeftFalseStart = false;
+bool lastRightFalseStart = false;
+bool lastFootLeftPressed = false;
+bool lastFootRightPressed = false;
+bool lastSinglePlayerMode = false;
+bool lastLeftFinished = false;
+bool lastRightFinished = false;
+long lastReactionTimeLeft = 0;
+long lastReactionTimeRight = 0;
+unsigned long lastCompletionTimeLeft = 0;
+unsigned long lastCompletionTimeRight = 0;
+
 // Track when false starts occur for negative reaction time calculation
 unsigned long leftFalseStartTime = 0;
 unsigned long rightFalseStartTime = 0;
+
+// Tracking isngle player mode
+bool leftLaneActive = false;
+bool rightLaneActive = false;
 
 // Left side timing - changed to signed long for negative reaction times
 long reactionTimeLeft = 0;
@@ -486,12 +507,20 @@ void handleStartButton() {
   // Check if we're in ready-to-start state
   bool canStart = false;
 
-  if (singlePlayerMode) {
+if (singlePlayerMode) {
     // Single player: allow if at least one foot sensor is pressed
     canStart = (footLeftPressed || footRightPressed) && !isPlayingAudio && !isPlayingFalseStart && !isTimerRunning;
+    
+    // Set which lane is active
+    leftLaneActive = footLeftPressed;
+    rightLaneActive = footRightPressed;
   } else {
     // Competition mode: require BOTH foot sensors
     canStart = footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart && !isTimerRunning;
+    
+    // Both lanes active in competition mode
+    leftLaneActive = true;
+    rightLaneActive = true;
   }
 
   if (canStart) {
@@ -828,6 +857,9 @@ void resetTimer() {
   leftFinished = false;
   rightFinished = false;
   audioEndTime = 0;
+  // Reset lane activity
+  leftLaneActive = false;
+  rightLaneActive = false;
 
   // Turn off all LEDs when reset
   turnOffAllLEDs();
@@ -919,9 +951,53 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
 
 void updateWebSocket() {
   unsigned long currentTime = millis();
-  // Only send updates if timer is running or audio is playing, or if it's been a while since last update
-  if (isTimerRunning || isPlayingAudio || isPlayingFalseStart || (currentTime - lastWebSocketUpdate >= WEBSOCKET_UPDATE_INTERVAL)) {
+  
+  // Check if any state has changed, but only for active lanes in single player mode
+  bool stateChanged = (
+    isTimerRunning != lastTimerRunning ||
+    isPlayingAudio != lastPlayingAudio ||
+    isPlayingFalseStart != lastPlayingFalseStart ||
+    falseStartOccurred != lastFalseStartOccurred ||
+    singlePlayerMode != lastSinglePlayerMode ||
+    // Only check left lane changes if it's active (or in competition mode)
+    (!singlePlayerMode || leftLaneActive) && (
+      leftFalseStart != lastLeftFalseStart ||
+      footLeftPressed != lastFootLeftPressed ||
+      leftFinished != lastLeftFinished ||
+      reactionTimeLeft != lastReactionTimeLeft ||
+      completionTimeLeft != lastCompletionTimeLeft
+    ) ||
+    // Only check right lane changes if it's active (or in competition mode)
+    (!singlePlayerMode || rightLaneActive) && (
+      rightFalseStart != lastRightFalseStart ||
+      footRightPressed != lastFootRightPressed ||
+      rightFinished != lastRightFinished ||
+      reactionTimeRight != lastReactionTimeRight ||
+      completionTimeRight != lastCompletionTimeRight
+    )
+  );
+  
+  // Send updates if timer is running, audio is playing, or relevant state has changed
+  if (isTimerRunning || isPlayingAudio || isPlayingFalseStart || stateChanged) {
     sendWebSocketUpdate();
+    
+    // Update last known state
+    lastTimerRunning = isTimerRunning;
+    lastPlayingAudio = isPlayingAudio;
+    lastPlayingFalseStart = isPlayingFalseStart;
+    lastFalseStartOccurred = falseStartOccurred;
+    lastLeftFalseStart = leftFalseStart;
+    lastRightFalseStart = rightFalseStart;
+    lastFootLeftPressed = footLeftPressed;
+    lastFootRightPressed = footRightPressed;
+    lastSinglePlayerMode = singlePlayerMode;
+    lastLeftFinished = leftFinished;
+    lastRightFinished = rightFinished;
+    lastReactionTimeLeft = reactionTimeLeft;
+    lastReactionTimeRight = reactionTimeRight;
+    lastCompletionTimeLeft = completionTimeLeft;
+    lastCompletionTimeRight = completionTimeRight;
+    
     lastWebSocketUpdate = currentTime;
   }
 }
@@ -1401,15 +1477,13 @@ void handleRoot() {
       </div>
       
       <div class='instructions'>
-        <strong id='instructions-title'>Competition Instructions:</strong><br>
+        <strong id='instructions-title'>Single Player Instructions:</strong><br>
         <span id='instructions-text'>
-        1. Both climbers press and hold foot sensors<br>
-        2. Press Start to begin audio sequence<br>
-        3. Keep foot sensors pressed during entire audio<br>
-        4. Release foot sensor when ready to climb<br>
-        5. Hit your stop sensor when you reach the top<br>
-        6. Early foot release = FALSE START (negative reaction time)!<br>
-        <strong>Both climbers can still finish even if one false starts</strong>
+          1. Press and hold <b>ONE</b> foot sensor<br>
+          2. Press Start to begin audio countdown or <b>stand on foot sensor for 3 seconds</b><br>
+          3. Keep foot sensor pressed during entire audio countdown<br>
+          4. Start climbing on the high picthed start tone<br>
+          5. Hit your stop sensor when you reach the top<br>
         </span>
       </div>
     </div>
@@ -1500,12 +1574,11 @@ void handleRoot() {
         if(data.single_player_mode) {
           instructionsTitle.textContent = 'Single Player Instructions:';
           instructionsText.innerHTML = `
-            1. Press and hold ONE foot sensor<br>
-            2. Press Start to begin audio countdown<br>
+            1. Press and hold <b>ONE</b> foot sensor<br>
+            2. Press Start to begin audio countdown or <b>stand on foot sensor for 3 seconds</b><br>
             3. Keep foot sensor pressed during entire audio countdown<br>
-            4. Start climbing when the tone finishes<br>
+            4. Start climbing on the high picthed start tone<br>
             5. Hit your stop sensor when you reach the top<br>
-            6. Early foot release = FALSE START!
           `;
         } else {
           instructionsTitle.textContent = 'Competition Instructions:';
@@ -1513,9 +1586,8 @@ void handleRoot() {
             1. Both climbers press and hold foot sensors<br>
             2. Press Start to begin audio countdown<br>
             3. Keep foot sensors pressed during entire audio countdown<br>
-            4. Start climbing when the tone finishes<br>
+            4. Start climbing on the high picthed start tone<br>
             5. Hit your stop sensor when you reach the top<br>
-            6. Early foot release = FALSE START!<br>
             <strong>Both climbers can still finish even if one false starts</strong>
           `;
         }
