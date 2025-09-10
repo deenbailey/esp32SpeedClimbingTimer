@@ -24,6 +24,18 @@ CRGB ledsRight[NUM_LEDS_PER_STRIP];
 const char* ssid = "Nacho WiFi";
 const char* password = "airforce11";
 
+// Gravitry Worx Wifi
+// const char* ssid = "Optus_53BE2F";
+// const char* password = "kudzuzerdauRX5r";
+
+// Work Phone Wifi
+// const char* ssid = "IPY6J60VPXF0";
+// const char* password = "password133";
+
+// Dean Phone Wifi
+// const char* ssid = "Deen";
+// const char* password = "password";
+
 // Audio Config
 #define LEDC_CHANNEL 0
 #define LEDC_RESOLUTION 8
