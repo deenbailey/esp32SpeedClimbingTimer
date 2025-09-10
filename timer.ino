@@ -4,17 +4,15 @@
 #include <WebSocketsServer.h>
 #include <FastLED.h>
 
-// GPIO 4 for LEDs causes E (81) phy_comm: gpio[1] number: 25 is reserved
-
-// ================== Hardware Config ==================
-#define START_BUTTON 19  // done
+// Hardware Config
+#define START_BUTTON 19
 #define STOP_SENSOR_LEFT 14
 #define STOP_SENSOR_RIGHT 33
 #define FOOT_SENSOR_LEFT 13
 #define FOOT_SENSOR_RIGHT 26
 #define AUDIO_PIN 22
 
-// ================== LED Strip Config ==================
+// LED Strip Config
 #define LED_PIN_LEFT 17
 #define LED_PIN_RIGHT 18
 #define NUM_LEDS_PER_STRIP 60
@@ -22,88 +20,82 @@
 CRGB ledsLeft[NUM_LEDS_PER_STRIP];
 CRGB ledsRight[NUM_LEDS_PER_STRIP];
 
-// ================== WiFi Config ==================
-// const char* ssid = "IPY6J60VPXF0";
-// const char* password = "password133";
-
+// WiFi Config
 const char* ssid = "Nacho WiFi";
 const char* password = "airforce11";
 
-// Gravitry Worx Wifi
-// const char* ssid = "Optus_53BE2F";
-// const char* password = "kudzuzerdauRX5r";
-
-// ================== Audio Config ==================
+// Audio Config
 #define LEDC_CHANNEL 0
 #define LEDC_RESOLUTION 8
 
-// Audio sequence timing (all in milliseconds)
 struct AudioStep {
-  int frequency;  // 0 = silence
+  int frequency;
   unsigned long duration;
 };
 
 const AudioStep audioSequence[] = {
-  { 0, 500 },    // Silence 500ms
-  { 880, 250 },  // 880Hz for 250ms
-  { 0, 750 },    // Silence 500ms
-  { 880, 250 },  // 880Hz for 250ms
-  { 0, 750 },    // Silence 500ms
-  { 1760, 150 }  // 1760Hz for 150ms
+  { 0, 500 }, { 880, 250 }, { 0, 750 }, { 880, 250 }, { 0, 750 }, { 1760, 150 }
+};
+
+const AudioStep falseStartSequence[] = {
+  { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 },
+  { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 },
+  { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 },
+  { 1568, 100 }, { 0, 100 }
 };
 
 const int AUDIO_SEQUENCE_LENGTH = sizeof(audioSequence) / sizeof(AudioStep);
-
-// False start audio sequence
-const AudioStep falseStartSequence[] = {
-  { 1568, 100 },  // 1568Hz for 100ms
-  { 0, 100 },     // Silence for 100ms
-  { 1568, 100 },  // 1568Hz for 100ms
-  { 0, 100 },     // Silence for 100ms
-  { 1568, 100 },  // 1568Hz for 100ms
-  { 0, 100 },     // Silence for 100ms
-  { 1568, 100 },  // 1568Hz for 100ms
-  { 0, 100 },     // Silence for 100ms
-  { 1568, 100 },  // 1568Hz for 100ms
-  { 0, 100 },     // Silence for 100ms
-  { 1568, 100 },  // 1568Hz for 100ms
-  { 0, 100 },     // Silence for 100ms
-  { 1568, 100 },  // 1568Hz for 100ms
-  { 0, 100 },     // Silence for 100ms
-  { 1568, 100 },  // 1568Hz for 100ms
-  { 0, 100 },     // Silence for 100ms
-  { 1568, 100 },  // 1568Hz for 100ms
-  { 0, 100 },     // Silence for 100ms
-  { 1568, 100 },  // 1568Hz for 100ms
-  { 0, 100 }      // Final silence for 100ms
-};
-
 const int FALSE_START_SEQUENCE_LENGTH = sizeof(falseStartSequence) / sizeof(AudioStep);
 
-// ================== Global Variables ==================
+// Global Variables
 WebServer server(80);
 WebSocketsServer webSocket = WebSocketsServer(81);
+
+// Timer state
 bool isTimerRunningLeft = false;
 bool isTimerRunningRight = false;
 unsigned long timerStartTime = 0;
 unsigned long currentElapsedTime = 0;
+
+// Audio state
 bool isPlayingAudio = false;
 bool isPlayingFalseStart = false;
+int currentAudioStep = 0;
+unsigned long audioStepStartTime = 0;
+unsigned long audioSequenceStartTime = 0;
+unsigned long audioEndTime = 0;
+
+// Button/sensor state
 bool startButtonPressed = false;
 bool stopLeftPressed = false;
 bool stopRightPressed = false;
 bool footLeftPressed = false;
 bool footRightPressed = false;
+
+// False start tracking
 bool falseStartOccurred = false;
 bool leftFalseStart = false;
 bool rightFalseStart = false;
-bool leftFootValidDuringAudio = true;      // Track if left foot stayed pressed during audio
-bool rightFootValidDuringAudio = true;     // Track if right foot stayed pressed during audio
-bool falseStartAudioPlayed = false;        // Ensure false start audio only plays once
-bool singlePlayerMode = true;              // New: Single player mode toggle
-unsigned long audioSequenceStartTime = 0;  // Track when the entire audio sequence started
+bool leftFootValidDuringAudio = true;
+bool rightFootValidDuringAudio = true;
+bool falseStartAudioPlayed = false;
+unsigned long leftFalseStartTime = 0;
+unsigned long rightFalseStartTime = 0;
 
-// STATE Manager variables
+// Mode and lane tracking
+bool singlePlayerMode = true;
+bool leftLaneActive = false;
+bool rightLaneActive = false;
+
+// Timing results
+long reactionTimeLeft = 0;
+long reactionTimeRight = 0;
+unsigned long completionTimeLeft = 0;
+unsigned long completionTimeRight = 0;
+bool leftFinished = false;
+bool rightFinished = false;
+
+// State tracking for updates
 bool lastTimerRunning = false;
 bool lastPlayingAudio = false;
 bool lastPlayingFalseStart = false;
@@ -122,54 +114,74 @@ unsigned long lastCompletionTimeRight = 0;
 bool lastTimerRunningLeft = false;
 bool lastTimerRunningRight = false;
 
-// Track when false starts occur for negative reaction time calculation
-unsigned long leftFalseStartTime = 0;
-unsigned long rightFalseStartTime = 0;
-
-unsigned long lastEventTime = 0;           // Track when last significant event occurred
-bool resetTimeoutActive = false;           // Flag to indicate if timeout is active
-const unsigned long RESET_TIMEOUT = 1300;  // 1.3 seconds in milliseconds
-
-// Tracking isngle player mode
-bool leftLaneActive = false;
-bool rightLaneActive = false;
-
-// Left side timing - changed to signed long for negative reaction times
-long reactionTimeLeft = 0;
-unsigned long completionTimeLeft = 0;
-bool leftFinished = false;
-
-// Right side timing - changed to signed long for negative reaction times
-long reactionTimeRight = 0;
-unsigned long completionTimeRight = 0;
-bool rightFinished = false;
-
-unsigned long audioEndTime = 0;
+// Timing control
+unsigned long lastEventTime = 0;
+bool resetTimeoutActive = false;
+const unsigned long RESET_TIMEOUT = 1300;
 unsigned long lastButtonCheck = 0;
 unsigned long lastWebSocketUpdate = 0;
 const unsigned long BUTTON_DEBOUNCE = 10;
-const unsigned long WEBSOCKET_UPDATE_INTERVAL = 50;  // Update every 50ms
-unsigned long footPressStartTime = 0;                // When foot sensor was first pressed
-bool footHeldForAutoStart = false;                   // Track if we're counting down for auto-start
-const unsigned long AUTO_START_DELAY = 3000;         // 3 seconds in milliseconds
+const unsigned long WEBSOCKET_UPDATE_INTERVAL = 50;
 
+// Auto-start
+unsigned long footPressStartTime = 0;
+bool footHeldForAutoStart = false;
+const unsigned long AUTO_START_DELAY = 3000;
 
-// Non-blocking audio sequence state
-int currentAudioStep = 0;
-unsigned long audioStepStartTime = 0;
-
-
-//WIFI TIMEOUT
+// WiFi timeout
 unsigned long startTime = millis();
-unsigned long timeout = 30000;  // 1 minute in milliseconds
+unsigned long timeout = 30000;
 
-// ================== LED Functions ==================
+// Utility Functions
+bool isAnyTimerRunning() {
+  return isTimerRunningLeft || isTimerRunningRight;
+}
+
+bool isReadyState() {
+  return !isPlayingAudio && !isPlayingFalseStart && !isAnyTimerRunning();
+}
+
+bool canStartCompetition() {
+  if (singlePlayerMode) {
+    return (footLeftPressed || footRightPressed) && isReadyState();
+  }
+  return footLeftPressed && footRightPressed && isReadyState();
+}
+
+void setLaneActivity() {
+  if (singlePlayerMode) {
+    leftLaneActive = footLeftPressed;
+    rightLaneActive = footRightPressed;
+  } else {
+    leftLaneActive = true;
+    rightLaneActive = true;
+  }
+}
+
+void resetCompetitionState() {
+  falseStartOccurred = false;
+  leftFalseStart = false;
+  rightFalseStart = false;
+  leftFootValidDuringAudio = true;
+  rightFootValidDuringAudio = true;
+  falseStartAudioPlayed = false;
+  leftFalseStartTime = 0;
+  rightFalseStartTime = 0;
+  reactionTimeLeft = 0;
+  reactionTimeRight = 0;
+  completionTimeLeft = 0;
+  completionTimeRight = 0;
+  leftFinished = false;
+  rightFinished = false;
+  resetTimeoutActive = false;
+  lastEventTime = 0;
+}
+
+// LED Functions
 void initializeLEDs() {
   FastLED.addLeds<WS2812B, LED_PIN_LEFT, GRB>(ledsLeft, NUM_LEDS_PER_STRIP);
   FastLED.addLeds<WS2812B, LED_PIN_RIGHT, GRB>(ledsRight, NUM_LEDS_PER_STRIP);
-  FastLED.setBrightness(128);  // Set brightness to 50%
-
-  // Turn off all LEDs initially
+  FastLED.setBrightness(128);
   fill_solid(ledsLeft, NUM_LEDS_PER_STRIP, CRGB::Black);
   fill_solid(ledsRight, NUM_LEDS_PER_STRIP, CRGB::Black);
   FastLED.show();
@@ -191,488 +203,32 @@ void turnOffAllLEDs() {
   FastLED.show();
 }
 
-void setup() {
-  Serial.begin(115200);
-
-  // Initialize pins
-  pinMode(START_BUTTON, INPUT_PULLUP);
-  pinMode(STOP_SENSOR_LEFT, INPUT_PULLUP);
-  pinMode(STOP_SENSOR_RIGHT, INPUT_PULLUP);
-  pinMode(FOOT_SENSOR_LEFT, INPUT_PULLUP);
-  pinMode(FOOT_SENSOR_RIGHT, INPUT_PULLUP);
-
-  // Initialize LED strips
-  initializeLEDs();
-
-  // Initialize LEDC for audio - using newer ESP32 Arduino Core functions
-  ledcAttach(AUDIO_PIN, 1000, LEDC_RESOLUTION);  // Start with 1kHz base frequency
-  ledcWrite(AUDIO_PIN, 0);                       // Start with no sound
-
-  // Connect to WiFi
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED && (millis() - startTime) < timeout) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("\nWiFi connection timeout!");
-    // Handle timeout - maybe restart, go to AP mode, etc.
+void setLEDsBasedOnState(bool isLeft, bool falseStart, CRGB normalColor) {
+  if (isLeft) {
+    setLeftLEDs(falseStart ? CRGB::Red : normalColor);
   } else {
-    Serial.println("\nWiFi connected!");
-  }
-
-  Serial.println();
-  Serial.println("WiFi connected!");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-
-  // Setup web server routes
-  server.on("/", HTTP_GET, handleRoot);
-  server.on("/api/status", HTTP_GET, handleApiStatus);
-  server.on("/api/start", HTTP_POST, handleApiStart);
-  server.on("/api/stop", HTTP_POST, handleApiStop);
-  server.on("/api/reset", HTTP_POST, handleApiReset);
-
-  // Setup WebSocket server
-  webSocket.begin();
-  webSocket.onEvent(webSocketEvent);
-
-  server.begin();
-  Serial.println("HTTP server started");
-  Serial.println("WebSocket server started on port 81");
-}
-
-void loop() {
-  server.handleClient();
-  webSocket.loop();
-  checkButtons();
-  updateAudioSequence();
-  updateTimer();
-  updateWebSocket();
-}
-
-bool isAnyTimerRunning() {
-  return isTimerRunningLeft || isTimerRunningRight;
-}
-
-void checkButtons() {
-  if (millis() - lastButtonCheck < BUTTON_DEBOUNCE) return;
-
-  bool startPressed = !digitalRead(START_BUTTON);
-  bool stopLeftNow = !digitalRead(STOP_SENSOR_LEFT);
-  bool stopRightNow = !digitalRead(STOP_SENSOR_RIGHT);
-  bool footLeftNow = (digitalRead(FOOT_SENSOR_LEFT) == LOW);
-  bool footRightNow = (digitalRead(FOOT_SENSOR_RIGHT) == LOW);
-
-  // Check if we're in the "ready" state where foot sensor LED feedback should be active
-  bool inReadyState = !isPlayingAudio && !isPlayingFalseStart && !isAnyTimerRunning();
-
-  // During audio sequence, track if either foot sensor is released (false start)
-  // MODIFIED: Only check for false starts BEFORE the 1760Hz tone starts (currentAudioStep < 5)
-  // Only check for false starts on active sensors based on mode
-  if (isPlayingAudio && !isPlayingFalseStart && currentAudioStep < 5) {
-    if (singlePlayerMode) {
-      // In single player mode, only check the sensor that was initially pressed
-      if (footLeftPressed && !footLeftNow && leftFootValidDuringAudio) {
-        leftFootValidDuringAudio = false;
-        leftFalseStart = true;
-        falseStartOccurred = true;
-        leftFalseStartTime = millis();
-        setLeftLEDs(CRGB::Red);  // Turn on red LEDs for left false start
-        resetTimeoutActive = true;
-        lastEventTime = millis();
-      }
-      if (footRightPressed && !footRightNow && rightFootValidDuringAudio) {
-        rightFootValidDuringAudio = false;
-        rightFalseStart = true;
-        falseStartOccurred = true;
-        rightFalseStartTime = millis();
-        setRightLEDs(CRGB::Red);  // Turn on red LEDs for right false start
-        resetTimeoutActive = true;
-        lastEventTime = millis();
-      }
-    } else {
-      // Competition mode: check both sensors
-      if (!footLeftNow && leftFootValidDuringAudio) {
-        leftFootValidDuringAudio = false;
-        leftFalseStart = true;
-        falseStartOccurred = true;
-        leftFalseStartTime = millis();
-        setLeftLEDs(CRGB::Red);  // Turn on red LEDs for left false start
-      }
-      if (!footRightNow && rightFootValidDuringAudio) {
-        rightFootValidDuringAudio = false;
-        rightFalseStart = true;
-        falseStartOccurred = true;
-        rightFalseStartTime = millis();
-        setRightLEDs(CRGB::Red);  // Turn on red LEDs for right false start
-      }
-    }
-  }
-
-  // Handle foot sensor left state changes
-  if (footLeftNow && !footLeftPressed) {
-    footLeftPressed = true;
-
-    // NEW: In single player mode, if timer is running and foot sensor is pressed again, reset
-    if (singlePlayerMode && isAnyTimerRunning()) {
-      if (resetTimeoutActive && (millis() - lastEventTime < RESET_TIMEOUT)) {
-        return;  // Ignore foot sensor reset during timeout
-      }
-      handleApiReset();
-      return;  // Exit early after reset
-    }
-
-    // In single player mode, start tracking time for auto-start
-    if (singlePlayerMode && !isPlayingAudio && !isPlayingFalseStart && !isAnyTimerRunning()) {
-      if (!footRightPressed) {  // Only if this is the only foot pressed
-        footPressStartTime = millis();
-        footHeldForAutoStart = true;
-      }
-    }
-
-    // LED feedback only during ready state
-    if (inReadyState) {
-      setLeftLEDs(CRGB::Green);
-    }
-  } else if (!footLeftNow && footLeftPressed) {
-    footLeftPressed = false;
-
-    // Reset auto-start tracking if foot is released
-    if (singlePlayerMode && footHeldForAutoStart && !footRightPressed) {
-      footHeldForAutoStart = false;
-      footPressStartTime = 0;
-    }
-
-    // LED feedback only during ready state
-    if (inReadyState) {
-      setLeftLEDs(CRGB::Black);  // Turn off LEDs
-    }
-
-    // MODIFIED: Calculate reaction time whenever foot is released after the 1760Hz tone starts
-    // This means currentAudioStep >= 5 OR audio has completely ended
-    if ((currentAudioStep >= 5 || audioEndTime > 0) && reactionTimeLeft == 0 && !leftFalseStart) {
-      if (audioEndTime > 0) {
-        // Audio completely finished - normal reaction time calculation
-        reactionTimeLeft = millis() - audioEndTime;
-      } else {
-        // 1760Hz tone is currently playing - calculate from when it started
-        unsigned long tone1760StartTime = audioStepStartTime;  // Time when current step (1760Hz) started
-        reactionTimeLeft = millis() - tone1760StartTime;
-      }
-      sendWebSocketUpdate();
-    }
-  }
-
-  // Handle foot sensor right state changes
-  if (footRightNow && !footRightPressed) {
-    footRightPressed = true;
-
-    // NEW: In single player mode, if timer is running and foot sensor is pressed again, reset
-    if (singlePlayerMode && isAnyTimerRunning()) {
-      if (resetTimeoutActive && (millis() - lastEventTime < RESET_TIMEOUT)) {
-        return;  // Ignore foot sensor reset during timeout
-      }
-      handleApiReset();
-      return;  // Exit early after reset
-    }
-
-    // In single player mode, start tracking time for auto-start
-    if (singlePlayerMode && !isPlayingAudio && !isPlayingFalseStart && !isAnyTimerRunning()) {
-      if (!footLeftPressed) {  // Only if this is the only foot pressed
-        footPressStartTime = millis();
-        footHeldForAutoStart = true;
-      }
-    }
-
-    // LED feedback only during ready state
-    if (inReadyState) {
-      setRightLEDs(CRGB::Green);
-    }
-  } else if (!footRightNow && footRightPressed) {
-    footRightPressed = false;
-
-    // Reset auto-start tracking if foot is released
-    if (singlePlayerMode && footHeldForAutoStart && !footLeftPressed) {
-      footHeldForAutoStart = false;
-      footPressStartTime = 0;
-    }
-
-    // LED feedback only during ready state
-    if (inReadyState) {
-      setRightLEDs(CRGB::Black);  // Turn off LEDs
-    }
-
-    // MODIFIED: Calculate reaction time whenever foot is released after the 1760Hz tone starts
-    // This means currentAudioStep >= 5 OR audio has completely ended
-    if ((currentAudioStep >= 5 || audioEndTime > 0) && reactionTimeRight == 0 && !rightFalseStart) {
-      if (audioEndTime > 0) {
-        // Audio completely finished - normal reaction time calculation
-        reactionTimeRight = millis() - audioEndTime;
-      } else {
-        // 1760Hz tone is currently playing - calculate from when it started
-        unsigned long tone1760StartTime = audioStepStartTime;  // Time when current step (1760Hz) started
-        reactionTimeRight = millis() - tone1760StartTime;
-      }
-      sendWebSocketUpdate();
-    }
-  }
-
-  // Check for auto-start in single player mode
-  if (singlePlayerMode && footHeldForAutoStart && !isPlayingAudio && !isPlayingFalseStart && !isAnyTimerRunning()) {
-    if (millis() - footPressStartTime >= AUTO_START_DELAY) {
-      // Auto-start the sequence
-      footHeldForAutoStart = false;
-      footPressStartTime = 0;
-
-      // Set which lane is active based on current foot sensor state
-      leftLaneActive = footLeftPressed;
-      rightLaneActive = footRightPressed;
-
-      // Start the competition automatically
-      falseStartOccurred = false;
-      leftFalseStart = false;
-      rightFalseStart = false;
-      leftFootValidDuringAudio = true;
-      rightFootValidDuringAudio = true;
-      falseStartAudioPlayed = false;
-      leftFalseStartTime = 0;
-      rightFalseStartTime = 0;
-      reactionTimeLeft = 0;
-      reactionTimeRight = 0;
-      completionTimeLeft = 0;
-      completionTimeRight = 0;
-      leftFinished = false;
-      rightFinished = false;
-      startAudioSequence();
-    }
-  }
-
-  // Handle foot sensor right state changes
-  if (footRightNow && !footRightPressed) {
-    footRightPressed = true;
-
-    // LED feedback only during ready state
-    if (inReadyState) {
-      setRightLEDs(CRGB::Green);
-    }
-  } else if (!footRightNow && footRightPressed) {
-    footRightPressed = false;
-
-    // LED feedback only during ready state
-    if (inReadyState) {
-      setRightLEDs(CRGB::Black);  // Turn off LEDs
-    }
-
-    // MODIFIED: Calculate reaction time whenever foot is released after the 1760Hz tone starts
-    // This means currentAudioStep >= 5 OR audio has completely ended
-    if ((currentAudioStep >= 5 || audioEndTime > 0) && reactionTimeRight == 0 && !rightFalseStart) {
-      if (audioEndTime > 0) {
-        // Audio completely finished - normal reaction time calculation
-        reactionTimeRight = millis() - audioEndTime;
-      } else {
-        // 1760Hz tone is currently playing - calculate from when it started
-        unsigned long tone1760StartTime = audioStepStartTime;  // Time when current step (1760Hz) started
-        reactionTimeRight = millis() - tone1760StartTime;
-      }
-      sendWebSocketUpdate();
-    }
-  }
-
-  // Handle start button
-  if (startPressed && !startButtonPressed) {
-    startButtonPressed = true;
-    handleStartButton();
-  } else if (!startPressed) {
-    startButtonPressed = false;
-  }
-
-  // Handle stop sensor left
-  if (stopLeftNow && !stopLeftPressed) {
-    stopLeftPressed = true;
-    handleStopSensor(true);  // true for left side
-  } else if (!stopLeftNow) {
-    stopLeftPressed = false;
-  }
-
-  // Handle stop sensor right
-  if (stopRightNow && !stopRightPressed) {
-    stopRightPressed = true;
-    handleStopSensor(false);  // false for right side
-  } else if (!stopRightNow) {
-    stopRightPressed = false;
-  }
-
-  lastButtonCheck = millis();
-}
-
-void handleStartButton() {
-  // Check if we're in ready-to-start state
-  bool canStart = false;
-
-  if (singlePlayerMode) {
-    // Single player: allow if at least one foot sensor is pressed
-    canStart = (footLeftPressed || footRightPressed) && !isPlayingAudio && !isPlayingFalseStart && !isAnyTimerRunning();
-
-    // Set which lane is active based on which foot sensor is currently pressed
-    leftLaneActive = footLeftPressed;
-    rightLaneActive = footRightPressed;
-  } else {
-    // Competition mode: require BOTH foot sensors
-    canStart = footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart && !isAnyTimerRunning();
-
-    // Both lanes active in competition mode
-    leftLaneActive = true;
-    rightLaneActive = true;
-  }
-
-  if (canStart) {
-    // Start the competition
-    falseStartOccurred = false;
-    leftFalseStart = false;
-    rightFalseStart = false;
-    leftFootValidDuringAudio = true;
-    rightFootValidDuringAudio = true;
-    falseStartAudioPlayed = false;
-    leftFalseStartTime = 0;
-    rightFalseStartTime = 0;
-    reactionTimeLeft = 0;
-    reactionTimeRight = 0;
-    completionTimeLeft = 0;
-    completionTimeRight = 0;
-    leftFinished = false;
-    rightFinished = false;
-
-    // Clear reset timeout when starting new competition
-    resetTimeoutActive = false;
-    lastEventTime = 0;
-
-    startAudioSequence();
-  } else {
-    // Act as reset button in all other states
-    handleApiReset();
-    if (isPlayingAudio) {
-      isPlayingAudio = false;
-      currentAudioStep = 0;
-      stopTone();
-    }
-    if (isPlayingFalseStart) {
-      isPlayingFalseStart = false;
-      currentAudioStep = 0;
-      stopTone();
-    }
+    setRightLEDs(falseStart ? CRGB::Red : normalColor);
   }
 }
 
-void handleStopSensor(bool isLeft) {
-  if (isAnyTimerRunning()) {
-    // MODIFIED: Always record completion times, regardless of false start status
-    unsigned long completionTime = millis() - timerStartTime;
+// Audio Functions
+void playTone(int frequency) {
+  ledcChangeFrequency(AUDIO_PIN, frequency, LEDC_RESOLUTION);
+  ledcWrite(AUDIO_PIN, 128);
+}
 
-    if (isLeft && !leftFinished) {
-      completionTimeLeft = completionTime;
-      leftFinished = true;
-    } else if (!isLeft && !rightFinished) {
-      completionTimeRight = completionTime;
-      rightFinished = true;
-    }
-
-    if (isLeft) {
-      isTimerRunningLeft = false;
-    } else {
-      isTimerRunningRight = false;
-    }
-
-    // In competition mode, keep timers running until both finish
-    // In single player mode, stop when the active lane finishes
-    if (singlePlayerMode) {
-      // Single player: stop when the active participant finishes
-      if ((leftLaneActive && leftFinished) || (rightLaneActive && rightFinished)) {
-        // Timer for this lane is already stopped above
-      }
-    } else {
-      // Competition mode: only fully stop when both finish
-      if (leftFinished && rightFinished) {
-        isTimerRunningLeft = false;
-        isTimerRunningRight = false;
-      }
-    }
-
-    // Update elapsed time if all active timers stopped
-    if (!isAnyTimerRunning()) {
-      currentElapsedTime = millis() - timerStartTime;
-
-      // ADDED: Start reset timeout when race completes
-      resetTimeoutActive = true;
-      lastEventTime = millis();
-    }
-
-    // NEW: Determine winner immediately when first person finishes
-    if ((leftFinished || rightFinished) && !falseStartOccurred) {
-      // No false starts - first to finish wins
-      if (leftFinished && !rightFinished) {
-        // Left wins
-        setLeftLEDs(CRGB::Green);
-        setRightLEDs(CRGB::Red);
-      } else if (rightFinished && !leftFinished) {
-        // Right wins
-        setRightLEDs(CRGB::Green);
-        setLeftLEDs(CRGB::Red);
-      } else if (leftFinished && rightFinished) {
-        // Both finished at same time - compare times
-        if (completionTimeLeft < completionTimeRight) {
-          setLeftLEDs(CRGB::Green);
-          setRightLEDs(CRGB::Red);
-        } else if (completionTimeRight < completionTimeLeft) {
-          setRightLEDs(CRGB::Green);
-          setLeftLEDs(CRGB::Red);
-        } else {
-          // Tie - both stay green
-          setLeftLEDs(CRGB::Green);
-          setRightLEDs(CRGB::Green);
-        }
-      }
-    } else if (falseStartOccurred) {
-      // Handle winner determination with false starts
-      if (!leftFalseStart && !rightFalseStart) {
-        // Neither false started - normal winner logic (already handled above)
-      } else if (leftFalseStart && !rightFalseStart) {
-        // Left false started - right wins if they finish
-        if (rightFinished) {
-          setRightLEDs(CRGB::Green);
-          // Left already red from false start
-        }
-      } else if (!leftFalseStart && rightFalseStart) {
-        // Right false started - left wins if they finish
-        if (leftFinished) {
-          setLeftLEDs(CRGB::Green);
-          // Right already red from false start
-        }
-      }
-      // If both false started, no winner - both stay red
-    }
-
-    // Stop timer when both competitors finish (regardless of false starts)
-    if (leftFinished && rightFinished) {
-      stopTimer();
-    }
-
-    sendWebSocketUpdate();
-  }
+void stopTone() {
+  ledcWrite(AUDIO_PIN, 0);
 }
 
 void startAudioSequence() {
   isPlayingAudio = true;
   currentAudioStep = 0;
   audioStepStartTime = millis();
-  audioSequenceStartTime = millis();  // Record when the entire sequence started
-
+  audioSequenceStartTime = millis();
   setLeftLEDs(CRGB::Black);
   setRightLEDs(CRGB::Black);
-
-  // Start first step immediately
+  
   if (audioSequence[0].frequency > 0) {
     playTone(audioSequence[0].frequency);
   } else {
@@ -684,12 +240,33 @@ void startFalseStartSequence() {
   isPlayingFalseStart = true;
   currentAudioStep = 0;
   audioStepStartTime = millis();
-
-  // Start first step immediately
+  
   if (falseStartSequence[0].frequency > 0) {
     playTone(falseStartSequence[0].frequency);
   } else {
     stopTone();
+  }
+}
+
+void handleAudioLEDs(const AudioStep* sequence, int frequency) {
+  if (isPlayingAudio) {
+    if (frequency == 880 || frequency == 1760) {
+      setLEDsBasedOnState(true, leftFalseStart, CRGB::Green);
+      setLEDsBasedOnState(false, rightFalseStart, CRGB::Green);
+    } else {
+      setLEDsBasedOnState(true, leftFalseStart, CRGB::Black);
+      setLEDsBasedOnState(false, rightFalseStart, CRGB::Black);
+    }
+  } else if (isPlayingFalseStart) {
+    if (frequency == 1568) {
+      if (leftFalseStart) setLeftLEDs(CRGB::Red);
+      if (rightFalseStart) setRightLEDs(CRGB::Red);
+      if (!leftFalseStart) setLeftLEDs(CRGB::Black);
+      if (!rightFalseStart) setRightLEDs(CRGB::Black);
+    } else {
+      if (leftFalseStart) setLeftLEDs(CRGB::Black);
+      if (rightFalseStart) setRightLEDs(CRGB::Black);
+    }
   }
 }
 
@@ -699,22 +276,17 @@ void updateAudioSequence() {
   unsigned long currentTime = millis();
   unsigned long elapsed = currentTime - audioStepStartTime;
 
-  // Choose the correct sequence based on what's playing
   const AudioStep* sequence = isPlayingAudio ? audioSequence : falseStartSequence;
   int sequenceLength = isPlayingAudio ? AUDIO_SEQUENCE_LENGTH : FALSE_START_SEQUENCE_LENGTH;
 
-  // Check if current step is complete
   if (elapsed >= sequence[currentAudioStep].duration) {
     currentAudioStep++;
 
-    // Check if sequence is complete
     if (currentAudioStep >= sequenceLength) {
-      // Sequence complete
       stopTone();
       if (isPlayingAudio) {
         isPlayingAudio = false;
-        audioEndTime = millis();  // Record when audio ended
-        // Don't turn off LEDs here - let completeAudioSequence() handle LED state
+        audioEndTime = millis();
         completeAudioSequence();
       } else if (isPlayingFalseStart) {
         isPlayingFalseStart = false;
@@ -724,154 +296,69 @@ void updateAudioSequence() {
       return;
     }
 
-    // Start next step
     audioStepStartTime = currentTime;
+    
+    // START TIMER WHEN 1760Hz TONE BEGINS (step 5 in the sequence)
+    if (isPlayingAudio && currentAudioStep == 5 && sequence[currentAudioStep].frequency == 1760) {
+      startTimer();
+      audioEndTime = millis(); // Set this for reaction time calculations
+    }
+    
     if (sequence[currentAudioStep].frequency > 0) {
       playTone(sequence[currentAudioStep].frequency);
-
-      // Handle LED control based on audio frequency
-      if (isPlayingAudio) {
-        // Main audio sequence: 880Hz and 1760Hz = green, 0Hz = blank
-        // MODIFIED: Check for false starts before setting green LEDs
-        if (sequence[currentAudioStep].frequency == 880 || sequence[currentAudioStep].frequency == 1760) {
-          // Left LED: green if no false start, red if false start occurred
-          if (leftFalseStart) {
-            setLeftLEDs(CRGB::Red);
-          } else {
-            setLeftLEDs(CRGB::Green);
-          }
-
-          // Right LED: green if no false start, red if false start occurred
-          if (rightFalseStart) {
-            setRightLEDs(CRGB::Red);
-          } else {
-            setRightLEDs(CRGB::Green);
-          }
-        }
-      } else if (isPlayingFalseStart) {
-        // False start sequence: 1568Hz = flash red on false start lanes only
-        if (sequence[currentAudioStep].frequency == 1568) {
-          if (leftFalseStart) {
-            setLeftLEDs(CRGB::Red);
-          }
-          if (rightFalseStart) {
-            setRightLEDs(CRGB::Red);
-          }
-          // Keep non-false-start lanes off during flash
-          if (!leftFalseStart) {
-            setLeftLEDs(CRGB::Black);
-          }
-          if (!rightFalseStart) {
-            setRightLEDs(CRGB::Black);
-          }
-        }
-      }
+      handleAudioLEDs(sequence, sequence[currentAudioStep].frequency);
     } else {
       stopTone();
-
-      // Handle LED control for silence (0Hz)
-      if (isPlayingAudio) {
-        // MODIFIED: During silence, keep false start lanes red, turn off valid lanes
-        if (leftFalseStart) {
-          setLeftLEDs(CRGB::Red);  // Keep red for false start
-        } else {
-          setLeftLEDs(CRGB::Black);  // Turn off for valid competitor
-        }
-
-        if (rightFalseStart) {
-          setRightLEDs(CRGB::Red);  // Keep red for false start
-        } else {
-          setRightLEDs(CRGB::Black);  // Turn off for valid competitor
-        }
-      } else if (isPlayingFalseStart) {
-        // False start sequence: silence = turn OFF false start lanes for flashing effect
-        if (leftFalseStart) {
-          setLeftLEDs(CRGB::Black);  // Turn OFF for flashing
-        } else {
-          setLeftLEDs(CRGB::Black);
-        }
-        if (rightFalseStart) {
-          setRightLEDs(CRGB::Black);  // Turn OFF for flashing
-        } else {
-          setRightLEDs(CRGB::Black);
-        }
-      }
+      handleAudioLEDs(sequence, 0);
     }
   }
 }
 
-
-void playTone(int frequency) {
-  ledcChangeFrequency(AUDIO_PIN, frequency, LEDC_RESOLUTION);
-  ledcWrite(AUDIO_PIN, 128);  // 50% duty cycle for square wave
-}
-
-void stopTone() {
-  ledcWrite(AUDIO_PIN, 0);
+void calculateNegativeReactionTime(bool isLeft) {
+// Calculate when the 1760Hz tone should start based on the sequence timing
+  unsigned long tone1760ShouldStart = audioSequenceStartTime + 500 + 250 + 750 + 250 + 750;
+  
+  if (isLeft && leftFalseStart && leftFalseStartTime > 0) {
+    reactionTimeLeft = (long)leftFalseStartTime - (long)tone1760ShouldStart;
+  }
+  if (!isLeft && rightFalseStart && rightFalseStartTime > 0) {
+    reactionTimeRight = (long)rightFalseStartTime - (long)tone1760ShouldStart;
+  }
 }
 
 void completeAudioSequence() {
   isPlayingAudio = false;
   currentAudioStep = 0;
-  audioEndTime = millis();  // Record when audio ended
+  
+  // Remove this line since timer already started:
+  // audioEndTime = millis();
 
-  // MODIFIED: Calculate negative reaction times for false starts
-  // Now calculate from when the 1760Hz tone SHOULD have started, not when audio ended
-  if (leftFalseStart && leftFalseStartTime > 0) {
-    // Calculate the time when 1760Hz tone should have started
-    unsigned long tone1760ShouldStart = audioSequenceStartTime + 500 + 250 + 750 + 250 + 750;  // Sum of first 5 steps
-    // Calculate how early they started (negative reaction time)
-    reactionTimeLeft = (long)leftFalseStartTime - (long)tone1760ShouldStart;  // This will be negative
-  }
-  if (rightFalseStart && rightFalseStartTime > 0) {
-    // Calculate the time when 1760Hz tone should have started
-    unsigned long tone1760ShouldStart = audioSequenceStartTime + 500 + 250 + 750 + 250 + 750;  // Sum of first 5 steps
-    // Calculate how early they started (negative reaction time)
-    reactionTimeRight = (long)rightFalseStartTime - (long)tone1760ShouldStart;  // This will be negative
-  }
+  calculateNegativeReactionTime(true);
+  calculateNegativeReactionTime(false);
 
-  // FIXED: Always start timer immediately when audio sequence completes
-  startTimer();
-
-  // Play false start beep AFTER starting timer (doesn't delay valid competitor)
   if (falseStartOccurred && !falseStartAudioPlayed) {
     falseStartAudioPlayed = true;
     startFalseStartSequence();
   }
 
-  sendWebSocketUpdate();  // Immediate update when audio completes
+  sendWebSocketUpdate();
 }
 
 void completeFalseStartSequence() {
   isPlayingFalseStart = false;
   currentAudioStep = 0;
 
-  // Keep false start lanes red after sequence completes
-  if (leftFalseStart) {
-    setLeftLEDs(CRGB::Red);
-  }
-  if (rightFalseStart) {
-    setRightLEDs(CRGB::Red);
-  }
-  // Turn off LEDs for non-false-start lanes
-  if (!leftFalseStart) {
-    setLeftLEDs(CRGB::Black);
-  }
-  if (!rightFalseStart) {
-    setRightLEDs(CRGB::Black);
-  }
+  setLEDsBasedOnState(true, leftFalseStart, CRGB::Black);
+  setLEDsBasedOnState(false, rightFalseStart, CRGB::Black);
 
-  // Timer is already running from when main audio completed - no need to start it again
-
-  // ADDED: Start reset timeout after false start sequence completes
   resetTimeoutActive = true;
   lastEventTime = millis();
 
-  sendWebSocketUpdate();  // Immediate update when false start sequence completes
+  sendWebSocketUpdate();
 }
 
+// Timer Functions
 void startTimer() {
-  // Set timer running for active lanes
   if (!singlePlayerMode || leftLaneActive) {
     isTimerRunningLeft = true;
   }
@@ -895,31 +382,13 @@ void resetTimer() {
   isTimerRunningRight = false;
   currentElapsedTime = 0;
   timerStartTime = 0;
-  falseStartOccurred = false;
-  leftFalseStart = false;
-  rightFalseStart = false;
-  leftFootValidDuringAudio = true;
-  rightFootValidDuringAudio = true;
-  falseStartAudioPlayed = false;
-  leftFalseStartTime = 0;
-  rightFalseStartTime = 0;
-  reactionTimeLeft = 0;
-  reactionTimeRight = 0;
-  completionTimeLeft = 0;
-  completionTimeRight = 0;
-  leftFinished = false;
-  rightFinished = false;
   audioEndTime = 0;
-
-  // IMPORTANT: Reset lane activity tracking
   leftLaneActive = false;
   rightLaneActive = false;
 
-  // ADDED: Clear reset timeout when manually resetting
-  resetTimeoutActive = false;
-  lastEventTime = 0;
+  resetCompetitionState();
 
-  // IMPORTANT: Reset all the last state tracking variables
+  // Reset state tracking
   lastTimerRunningLeft = false;
   lastTimerRunningRight = false;
   lastPlayingAudio = false;
@@ -927,9 +396,9 @@ void resetTimer() {
   lastFalseStartOccurred = false;
   lastLeftFalseStart = false;
   lastRightFalseStart = false;
-  lastFootLeftPressed = footLeftPressed;    // Keep current foot state
-  lastFootRightPressed = footRightPressed;  // Keep current foot state
-  lastSinglePlayerMode = singlePlayerMode;  // Keep current mode
+  lastFootLeftPressed = footLeftPressed;
+  lastFootRightPressed = footRightPressed;
+  lastSinglePlayerMode = singlePlayerMode;
   lastLeftFinished = false;
   lastRightFinished = false;
   lastReactionTimeLeft = 0;
@@ -937,9 +406,7 @@ void resetTimer() {
   lastCompletionTimeLeft = 0;
   lastCompletionTimeRight = 0;
 
-  // Turn off all LEDs when reset
   turnOffAllLEDs();
-
   sendWebSocketUpdate();
 }
 
@@ -947,6 +414,396 @@ void updateTimer() {
   if (isAnyTimerRunning()) {
     currentElapsedTime = millis() - timerStartTime;
   }
+}
+
+// False Start Detection
+void checkFalseStart(bool isLeft, bool footPressed, bool footValid) {
+  if (isPlayingAudio && !isPlayingFalseStart && currentAudioStep < 5) {
+    if (singlePlayerMode) {
+      if ((isLeft && footLeftPressed && !footPressed && leftFootValidDuringAudio) ||
+          (!isLeft && footRightPressed && !footPressed && rightFootValidDuringAudio)) {
+        
+        if (isLeft) {
+          leftFootValidDuringAudio = false;
+          leftFalseStart = true;
+          leftFalseStartTime = millis();
+          setLeftLEDs(CRGB::Red);
+        } else {
+          rightFootValidDuringAudio = false;
+          rightFalseStart = true;
+          rightFalseStartTime = millis();
+          setRightLEDs(CRGB::Red);
+        }
+        
+        falseStartOccurred = true;
+        resetTimeoutActive = true;
+        lastEventTime = millis();
+      }
+    } else {
+      if ((isLeft && !footPressed && leftFootValidDuringAudio) ||
+          (!isLeft && !footPressed && rightFootValidDuringAudio)) {
+        
+        if (isLeft) {
+          leftFootValidDuringAudio = false;
+          leftFalseStart = true;
+          leftFalseStartTime = millis();
+          setLeftLEDs(CRGB::Red);
+        } else {
+          rightFootValidDuringAudio = false;
+          rightFalseStart = true;
+          rightFalseStartTime = millis();
+          setRightLEDs(CRGB::Red);
+        }
+        
+        falseStartOccurred = true;
+      }
+    }
+  }
+}
+
+// Reaction Time Calculation
+void calculateReactionTime(bool isLeft) {
+  if ((currentAudioStep >= 5 || audioEndTime > 0) && 
+      ((isLeft && reactionTimeLeft == 0 && !leftFalseStart) ||
+       (!isLeft && reactionTimeRight == 0 && !rightFalseStart))) {
+    
+    long reactionTime;
+    if (audioEndTime > 0) {
+      reactionTime = millis() - audioEndTime;
+    } else {
+      reactionTime = millis() - audioStepStartTime;
+    }
+    
+    if (isLeft) {
+      reactionTimeLeft = reactionTime;
+    } else {
+      reactionTimeRight = reactionTime;
+    }
+    
+    sendWebSocketUpdate();
+  }
+}
+
+// Button/Sensor Handling
+void handleFootSensorPress(bool isLeft) {
+  if (singlePlayerMode && isAnyTimerRunning()) {
+    if (resetTimeoutActive && (millis() - lastEventTime < RESET_TIMEOUT)) {
+      return;
+    }
+    handleApiReset();
+    return;
+  }
+
+  if (singlePlayerMode && isReadyState()) {
+    bool otherFootPressed = isLeft ? footRightPressed : footLeftPressed;
+    if (!otherFootPressed) {
+      footPressStartTime = millis();
+      footHeldForAutoStart = true;
+    }
+  }
+
+  if (isReadyState()) {
+    if (isLeft) {
+      setLeftLEDs(CRGB::Green);
+    } else {
+      setRightLEDs(CRGB::Green);
+    }
+  }
+}
+
+void handleFootSensorRelease(bool isLeft) {
+  if (singlePlayerMode && footHeldForAutoStart) {
+    bool otherFootPressed = isLeft ? footLeftPressed : footRightPressed;
+    if (!otherFootPressed) {
+      footHeldForAutoStart = false;
+      footPressStartTime = 0;
+    }
+  }
+
+  if (isReadyState()) {
+    if (isLeft) {
+      setLeftLEDs(CRGB::Black);
+    } else {
+      setRightLEDs(CRGB::Black);
+    }
+  }
+
+  calculateReactionTime(isLeft);
+}
+
+void checkAutoStart() {
+  if (singlePlayerMode && footHeldForAutoStart && isReadyState()) {
+    if (millis() - footPressStartTime >= AUTO_START_DELAY) {
+      footHeldForAutoStart = false;
+      footPressStartTime = 0;
+      setLaneActivity();
+      resetCompetitionState();
+      startAudioSequence();
+    }
+  }
+}
+
+void checkButtons() {
+  if (millis() - lastButtonCheck < BUTTON_DEBOUNCE) return;
+
+  bool startPressed = !digitalRead(START_BUTTON);
+  bool stopLeftNow = !digitalRead(STOP_SENSOR_LEFT);
+  bool stopRightNow = !digitalRead(STOP_SENSOR_RIGHT);
+  bool footLeftNow = (digitalRead(FOOT_SENSOR_LEFT) == LOW);
+  bool footRightNow = (digitalRead(FOOT_SENSOR_RIGHT) == LOW);
+
+  checkFalseStart(true, footLeftNow, leftFootValidDuringAudio);
+  checkFalseStart(false, footRightNow, rightFootValidDuringAudio);
+
+  // Handle foot sensor changes
+  if (footLeftNow && !footLeftPressed) {
+    footLeftPressed = true;
+    handleFootSensorPress(true);
+  } else if (!footLeftNow && footLeftPressed) {
+    footLeftPressed = false;
+    handleFootSensorRelease(true);
+  }
+
+  if (footRightNow && !footRightPressed) {
+    footRightPressed = true;
+    handleFootSensorPress(false);
+  } else if (!footRightNow && footRightPressed) {
+    footRightPressed = false;
+    handleFootSensorRelease(false);
+  }
+
+  checkAutoStart();
+
+  // Handle start button
+  if (startPressed && !startButtonPressed) {
+    startButtonPressed = true;
+    handleStartButton();
+  } else if (!startPressed) {
+    startButtonPressed = false;
+  }
+
+  // Handle stop sensors
+  if (stopLeftNow && !stopLeftPressed) {
+    stopLeftPressed = true;
+    handleStopSensor(true);
+  } else if (!stopLeftNow) {
+    stopLeftPressed = false;
+  }
+
+  if (stopRightNow && !stopRightPressed) {
+    stopRightPressed = true;
+    handleStopSensor(false);
+  } else if (!stopRightNow) {
+    stopRightPressed = false;
+  }
+
+  lastButtonCheck = millis();
+}
+
+void handleStartButton() {
+  if (canStartCompetition()) {
+    setLaneActivity();
+    resetCompetitionState();
+    startAudioSequence();
+  } else {
+    handleApiReset();
+    if (isPlayingAudio) {
+      isPlayingAudio = false;
+      currentAudioStep = 0;
+      stopTone();
+    }
+    if (isPlayingFalseStart) {
+      isPlayingFalseStart = false;
+      currentAudioStep = 0;
+      stopTone();
+    }
+  }
+}
+
+void determineWinner() {
+  if ((leftFinished || rightFinished) && !falseStartOccurred) {
+    if (leftFinished && !rightFinished) {
+      setLeftLEDs(CRGB::Green);
+      setRightLEDs(CRGB::Red);
+    } else if (rightFinished && !leftFinished) {
+      setRightLEDs(CRGB::Green);
+      setLeftLEDs(CRGB::Red);
+    } else if (leftFinished && rightFinished) {
+      if (completionTimeLeft < completionTimeRight) {
+        setLeftLEDs(CRGB::Green);
+        setRightLEDs(CRGB::Red);
+      } else if (completionTimeRight < completionTimeLeft) {
+        setRightLEDs(CRGB::Green);
+        setLeftLEDs(CRGB::Red);
+      } else {
+        setLeftLEDs(CRGB::Green);
+        setRightLEDs(CRGB::Green);
+      }
+    }
+  } else if (falseStartOccurred) {
+    if (!leftFalseStart && rightFalseStart && leftFinished) {
+      setLeftLEDs(CRGB::Green);
+    } else if (!rightFalseStart && leftFalseStart && rightFinished) {
+      setRightLEDs(CRGB::Green);
+    }
+  }
+}
+
+void handleStopSensor(bool isLeft) {
+  if (isAnyTimerRunning()) {
+    unsigned long completionTime = millis() - timerStartTime;
+
+    if (isLeft && !leftFinished) {
+      completionTimeLeft = completionTime;
+      leftFinished = true;
+      isTimerRunningLeft = false;
+    } else if (!isLeft && !rightFinished) {
+      completionTimeRight = completionTime;
+      rightFinished = true;
+      isTimerRunningRight = false;
+    }
+
+    if (!isAnyTimerRunning()) {
+      currentElapsedTime = millis() - timerStartTime;
+      resetTimeoutActive = true;
+      lastEventTime = millis();
+    }
+
+    determineWinner();
+
+    if (leftFinished && rightFinished) {
+      stopTimer();
+    }
+
+    sendWebSocketUpdate();
+  }
+}
+
+// WebSocket Functions
+bool hasStateChanged() {
+  bool footSensorChanged = (footLeftPressed != lastFootLeftPressed || footRightPressed != lastFootRightPressed);
+  bool timerStateChanged = (isTimerRunningLeft != lastTimerRunningLeft || isTimerRunningRight != lastTimerRunningRight);
+  bool leftLaneStateChanged = (!singlePlayerMode || leftLaneActive) && 
+    (leftFalseStart != lastLeftFalseStart || leftFinished != lastLeftFinished || 
+     reactionTimeLeft != lastReactionTimeLeft || completionTimeLeft != lastCompletionTimeLeft);
+  bool rightLaneStateChanged = (!singlePlayerMode || rightLaneActive) && 
+    (rightFalseStart != lastRightFalseStart || rightFinished != lastRightFinished || 
+     reactionTimeRight != lastReactionTimeRight || completionTimeRight != lastCompletionTimeRight);
+  bool otherStateChanged = (isPlayingAudio != lastPlayingAudio || isPlayingFalseStart != lastPlayingFalseStart || 
+    falseStartOccurred != lastFalseStartOccurred || singlePlayerMode != lastSinglePlayerMode);
+
+  return footSensorChanged || timerStateChanged || leftLaneStateChanged || rightLaneStateChanged || otherStateChanged;
+}
+
+void updateLastState() {
+  lastTimerRunningLeft = isTimerRunningLeft;
+  lastTimerRunningRight = isTimerRunningRight;
+  lastPlayingAudio = isPlayingAudio;
+  lastPlayingFalseStart = isPlayingFalseStart;
+  lastFalseStartOccurred = falseStartOccurred;
+  lastLeftFalseStart = leftFalseStart;
+  lastRightFalseStart = rightFalseStart;
+  lastFootLeftPressed = footLeftPressed;
+  lastFootRightPressed = footRightPressed;
+  lastSinglePlayerMode = singlePlayerMode;
+  lastLeftFinished = leftFinished;
+  lastRightFinished = rightFinished;
+  lastReactionTimeLeft = reactionTimeLeft;
+  lastReactionTimeRight = reactionTimeRight;
+  lastCompletionTimeLeft = completionTimeLeft;
+  lastCompletionTimeRight = completionTimeRight;
+}
+
+void updateWebSocket() {
+  bool shouldUpdate = false;
+
+  if (singlePlayerMode) {
+    shouldUpdate = (leftLaneActive && isTimerRunningLeft) || (rightLaneActive && isTimerRunningRight) || 
+                   isPlayingAudio || isPlayingFalseStart || hasStateChanged();
+  } else {
+    shouldUpdate = isAnyTimerRunning() || isPlayingAudio || isPlayingFalseStart || hasStateChanged();
+  }
+
+  if (shouldUpdate) {
+    sendWebSocketUpdate();
+    updateLastState();
+    lastWebSocketUpdate = millis();
+  }
+}
+
+void sendWebSocketUpdate() {
+  if (isAnyTimerRunning()) {
+    currentElapsedTime = millis() - timerStartTime;
+  }
+
+  DynamicJsonDocument doc(1024);
+
+  doc["is_timer_running"] = isAnyTimerRunning();
+  doc["is_playing_audio"] = isPlayingAudio;
+  doc["is_playing_false_start"] = isPlayingFalseStart;
+  doc["false_start_occurred"] = falseStartOccurred;
+  doc["left_false_start"] = leftFalseStart;
+  doc["right_false_start"] = rightFalseStart;
+  doc["single_player_mode"] = singlePlayerMode;
+
+  doc["foot_left_pressed"] = footLeftPressed;
+  doc["foot_right_pressed"] = footRightPressed;
+  doc["both_feet_ready"] = footLeftPressed && footRightPressed;
+  doc["ready_to_start"] = singlePlayerMode ? (footLeftPressed || footRightPressed) : (footLeftPressed && footRightPressed);
+
+  doc["elapsed_time"] = currentElapsedTime;
+  doc["formatted_time"] = formatTime(currentElapsedTime);
+
+  doc["reaction_time_left"] = reactionTimeLeft;
+  doc["formatted_reaction_time_left"] = formatSignedTime(reactionTimeLeft);
+  doc["completion_time_left"] = completionTimeLeft;
+  doc["formatted_completion_time_left"] = formatTime(completionTimeLeft);
+  doc["left_finished"] = leftFinished;
+
+  doc["reaction_time_right"] = reactionTimeRight;
+  doc["formatted_reaction_time_right"] = formatSignedTime(reactionTimeRight);
+  doc["completion_time_right"] = completionTimeRight;
+  doc["formatted_completion_time_right"] = formatTime(completionTimeRight);
+  doc["right_finished"] = rightFinished;
+
+  doc["uptime"] = millis();
+
+  String message;
+  serializeJson(doc, message);
+  webSocket.broadcastTXT(message);
+}
+
+String formatTime(unsigned long milliseconds) {
+  unsigned long totalSeconds = milliseconds / 1000;
+  unsigned long ms = milliseconds % 1000;
+  unsigned long seconds = totalSeconds % 60;
+  unsigned long minutes = totalSeconds / 60;
+
+  char timeStr[16];
+  sprintf(timeStr, "%lu:%02lu.%03lu", minutes, seconds, ms);
+  return String(timeStr);
+}
+
+String formatSignedTime(long milliseconds) {
+  if (milliseconds == 0) {
+    return "0:00.000";
+  }
+
+  bool isNegative = milliseconds < 0;
+  unsigned long absMilliseconds = abs(milliseconds);
+
+  unsigned long totalSeconds = absMilliseconds / 1000;
+  unsigned long ms = absMilliseconds % 1000;
+  unsigned long seconds = totalSeconds % 60;
+  unsigned long minutes = totalSeconds / 60;
+
+  char timeStr[17];
+  if (isNegative) {
+    sprintf(timeStr, "-%lu:%02lu.%03lu", minutes, seconds, ms);
+  } else {
+    sprintf(timeStr, "%lu:%02lu.%03lu", minutes, seconds, ms);
+  }
+  return String(timeStr);
 }
 
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
@@ -959,7 +816,6 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
       {
         IPAddress ip = webSocket.remoteIP(num);
         Serial.printf("WebSocket client #%u connected from %d.%d.%d.%d\n", num, ip[0], ip[1], ip[2], ip[3]);
-        // Send current status to new client
         sendWebSocketUpdate();
       }
       break;
@@ -970,31 +826,9 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
         Serial.printf("WebSocket received: %s\n", command.c_str());
 
         if (command == "start") {
-          bool canStart = false;
-
-          if (singlePlayerMode) {
-            // Single player: allow if at least one foot sensor is pressed
-            canStart = (footLeftPressed || footRightPressed) && !isPlayingAudio && !isPlayingFalseStart;
-          } else {
-            // Competition mode: require BOTH foot sensors
-            canStart = footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart;
-          }
-
-          if (canStart) {
-            falseStartOccurred = false;
-            leftFalseStart = false;
-            rightFalseStart = false;
-            leftFootValidDuringAudio = true;
-            rightFootValidDuringAudio = true;
-            falseStartAudioPlayed = false;
-            leftFalseStartTime = 0;   // Reset false start times
-            rightFalseStartTime = 0;  // Reset false start times
-            reactionTimeLeft = 0;
-            reactionTimeRight = 0;
-            completionTimeLeft = 0;
-            completionTimeRight = 0;
-            leftFinished = false;
-            rightFinished = false;
+          if (canStartCompetition()) {
+            setLaneActivity();
+            resetCompetitionState();
             startAudioSequence();
           }
         } else if (command == "stop") {
@@ -1016,7 +850,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
         } else if (command == "toggle_mode") {
           singlePlayerMode = !singlePlayerMode;
         }
-        sendWebSocketUpdate();  // Send immediate update after command
+        sendWebSocketUpdate();
       }
       break;
 
@@ -1025,140 +859,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
   }
 }
 
-void updateWebSocket() {
-  unsigned long currentTime = millis();
-
-  // Always check foot sensor changes for GUI feedback
-  bool footSensorChanged = (footLeftPressed != lastFootLeftPressed || footRightPressed != lastFootRightPressed);
-
-  // Check timer state changes per lane
-  bool timerStateChanged = (isTimerRunningLeft != lastTimerRunningLeft || isTimerRunningRight != lastTimerRunningRight);
-
-  // Check other relevant state changes per active lane
-  bool leftLaneStateChanged = (!singlePlayerMode || leftLaneActive) && (leftFalseStart != lastLeftFalseStart || leftFinished != lastLeftFinished || reactionTimeLeft != lastReactionTimeLeft || completionTimeLeft != lastCompletionTimeLeft);
-
-  bool rightLaneStateChanged = (!singlePlayerMode || rightLaneActive) && (rightFalseStart != lastRightFalseStart || rightFinished != lastRightFinished || reactionTimeRight != lastReactionTimeRight || completionTimeRight != lastCompletionTimeRight);
-
-  bool otherStateChanged = (isPlayingAudio != lastPlayingAudio || isPlayingFalseStart != lastPlayingFalseStart || falseStartOccurred != lastFalseStartOccurred || singlePlayerMode != lastSinglePlayerMode);
-
-  // Send updates based on what's actually running or changed
-  bool shouldUpdate = false;
-
-  if (singlePlayerMode) {
-    shouldUpdate = (leftLaneActive && isTimerRunningLeft) || (rightLaneActive && isTimerRunningRight) || isPlayingAudio || isPlayingFalseStart || footSensorChanged || timerStateChanged || leftLaneStateChanged || rightLaneStateChanged || otherStateChanged;
-  } else {
-    shouldUpdate = isAnyTimerRunning() || isPlayingAudio || isPlayingFalseStart || footSensorChanged || timerStateChanged || leftLaneStateChanged || rightLaneStateChanged || otherStateChanged;
-  }
-
-  if (shouldUpdate) {
-    sendWebSocketUpdate();
-
-    // Update last known state
-    lastTimerRunningLeft = isTimerRunningLeft;
-    lastTimerRunningRight = isTimerRunningRight;
-    lastPlayingAudio = isPlayingAudio;
-    lastPlayingFalseStart = isPlayingFalseStart;
-    lastFalseStartOccurred = falseStartOccurred;
-    lastLeftFalseStart = leftFalseStart;
-    lastRightFalseStart = rightFalseStart;
-    lastFootLeftPressed = footLeftPressed;
-    lastFootRightPressed = footRightPressed;
-    lastSinglePlayerMode = singlePlayerMode;
-    lastLeftFinished = leftFinished;
-    lastRightFinished = rightFinished;
-    lastReactionTimeLeft = reactionTimeLeft;
-    lastReactionTimeRight = reactionTimeRight;
-    lastCompletionTimeLeft = completionTimeLeft;
-    lastCompletionTimeRight = completionTimeRight;
-
-    lastWebSocketUpdate = currentTime;
-  }
-}
-
-void sendWebSocketUpdate() {
-  // Always get fresh timer value when sending update
-  if (isAnyTimerRunning()) {
-    currentElapsedTime = millis() - timerStartTime;
-  }
-
-  DynamicJsonDocument doc(1024);
-
-  doc["is_timer_running"] = isAnyTimerRunning();
-  doc["is_playing_audio"] = isPlayingAudio;
-  doc["is_playing_false_start"] = isPlayingFalseStart;
-  doc["false_start_occurred"] = falseStartOccurred;
-  doc["left_false_start"] = leftFalseStart;
-  doc["right_false_start"] = rightFalseStart;
-  doc["single_player_mode"] = singlePlayerMode;
-
-  // Foot sensor states
-  doc["foot_left_pressed"] = footLeftPressed;
-  doc["foot_right_pressed"] = footRightPressed;
-  doc["both_feet_ready"] = footLeftPressed && footRightPressed;
-  doc["ready_to_start"] = singlePlayerMode ? (footLeftPressed || footRightPressed) : (footLeftPressed && footRightPressed);
-
-  // Timing data
-  doc["elapsed_time"] = currentElapsedTime;
-  doc["formatted_time"] = formatTime(currentElapsedTime);
-
-  // Left side data (including negative reaction times)
-  doc["reaction_time_left"] = reactionTimeLeft;
-  doc["formatted_reaction_time_left"] = formatSignedTime(reactionTimeLeft);
-  doc["completion_time_left"] = completionTimeLeft;
-  doc["formatted_completion_time_left"] = formatTime(completionTimeLeft);
-  doc["left_finished"] = leftFinished;
-
-  // Right side data (including negative reaction times)
-  doc["reaction_time_right"] = reactionTimeRight;
-  doc["formatted_reaction_time_right"] = formatSignedTime(reactionTimeRight);
-  doc["completion_time_right"] = completionTimeRight;
-  doc["formatted_completion_time_right"] = formatTime(completionTimeRight);
-  doc["right_finished"] = rightFinished;
-
-  doc["uptime"] = millis();
-
-  String message;
-  serializeJson(doc, message);
-
-  webSocket.broadcastTXT(message);
-}
-
-String formatTime(unsigned long milliseconds) {
-  unsigned long totalSeconds = milliseconds / 1000;
-  unsigned long ms = milliseconds % 1000;
-  unsigned long seconds = totalSeconds % 60;
-  unsigned long minutes = totalSeconds / 60;
-
-  char timeStr[16];
-  sprintf(timeStr, "%lu:%02lu.%03lu", minutes, seconds, ms);
-  return String(timeStr);
-}
-
-// Format signed time for reaction times (can be negative for false starts)
-String formatSignedTime(long milliseconds) {
-  if (milliseconds == 0) {
-    return "0:00.000";
-  }
-
-  bool isNegative = milliseconds < 0;
-  unsigned long absMilliseconds = abs(milliseconds);
-
-  unsigned long totalSeconds = absMilliseconds / 1000;
-  unsigned long ms = absMilliseconds % 1000;
-  unsigned long seconds = totalSeconds % 60;
-  unsigned long minutes = totalSeconds / 60;
-
-  char timeStr[17];  // Extra space for minus sign
-  if (isNegative) {
-    sprintf(timeStr, "-%lu:%02lu.%03lu", minutes, seconds, ms);
-  } else {
-    sprintf(timeStr, "%lu:%02lu.%03lu", minutes, seconds, ms);
-  }
-  return String(timeStr);
-}
-
-// ================== Web Server Handlers ==================
-
+// Web Server Handlers
 void handleRoot() {
   String html = R"rawliteral(
 <!DOCTYPE html>
@@ -1331,7 +1032,7 @@ void handleRoot() {
       transition: all 0.3s ease;
       text-shadow: 0 1px 2px rgba(0,0,0,0.3);
       box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-      min-height: 44px; /* Touch-friendly minimum */
+      min-height: 44px;
       width: 100%;
       max-width: 200px;
     }
@@ -1408,7 +1109,6 @@ void handleRoot() {
       line-height: 1.4;
     }
     
-    /* Desktop view - side by side layout */
     @media (min-width: 768px) {
       body {
         padding: 20px;
@@ -1469,7 +1169,6 @@ void handleRoot() {
       }
     }
     
-    /* Large desktop view */
     @media (min-width: 1024px) {
       .timer-display {
         font-size: 3.6em;
@@ -1480,7 +1179,6 @@ void handleRoot() {
       }
     }
     
-    /* Very small mobile devices */
     @media (max-width: 360px) {
       body {
         padding: 5px;
@@ -1571,47 +1269,41 @@ void handleRoot() {
       ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
         
-        // Update individual timers - show completion time if finished, otherwise current timer
         const leftTimer = document.getElementById('timer-left');
         const rightTimer = document.getElementById('timer-right');
         
-        // LEFT TIMER - only update if foot was pressed initially or in competition mode
         if(!data.single_player_mode || data.left_finished || data.left_false_start || data.reaction_time_left != 0 || (data.is_timer_running && data.foot_left_pressed)) {
           if(data.left_finished && data.completion_time_left > 0) {
             leftTimer.textContent = data.formatted_completion_time_left;
-            leftTimer.style.background = 'rgba(34,197,94,0.2)'; // Green background when finished
+            leftTimer.style.background = 'rgba(34,197,94,0.2)';
           } else if(data.left_false_start) {
             leftTimer.textContent = 'FALSE START';
-            leftTimer.style.background = 'rgba(220,38,38,0.3)'; // Red background for false start
+            leftTimer.style.background = 'rgba(220,38,38,0.3)';
           } else {
             leftTimer.textContent = data.formatted_time;
-            leftTimer.style.background = 'rgba(255,255,255,0.1)'; // Default background
+            leftTimer.style.background = 'rgba(255,255,255,0.1)';
           }
         } else {
-          // In single player mode and left foot not active - show inactive state
           leftTimer.textContent = '0:00.000';
-          leftTimer.style.background = 'rgba(100,100,100,0.2)'; // Gray background for inactive
+          leftTimer.style.background = 'rgba(100,100,100,0.2)';
         }
         
-        // RIGHT TIMER - only update if foot was pressed initially or in competition mode
         if(!data.single_player_mode || data.right_finished || data.right_false_start || data.reaction_time_right != 0 || (data.is_timer_running && data.foot_right_pressed)) {
           if(data.right_finished && data.completion_time_right > 0) {
             rightTimer.textContent = data.formatted_completion_time_right;
-            rightTimer.style.background = 'rgba(34,197,94,0.2)'; // Green background when finished
+            rightTimer.style.background = 'rgba(34,197,94,0.2)';
           } else if(data.right_false_start) {
             rightTimer.textContent = 'FALSE START';
-            rightTimer.style.background = 'rgba(220,38,38,0.3)'; // Red background for false start
+            rightTimer.style.background = 'rgba(220,38,38,0.3)';
           } else {
             rightTimer.textContent = data.formatted_time;
-            rightTimer.style.background = 'rgba(255,255,255,0.1)'; // Default background
+            rightTimer.style.background = 'rgba(255,255,255,0.1)';
           }
         } else {
-          // In single player mode and right foot not active - show inactive state
           rightTimer.textContent = '0:00.000';
-          rightTimer.style.background = 'rgba(100,100,100,0.2)'; // Gray background for inactive
+          rightTimer.style.background = 'rgba(100,100,100,0.2)';
         }
         
-        // Update foot sensor status and ready state based on mode
         const footLeftDiv = document.getElementById('foot-status-left');
         const footRightDiv = document.getElementById('foot-status-right');
         
@@ -1631,7 +1323,6 @@ void handleRoot() {
           footRightDiv.className = 'foot-sensor foot-released';
         }
         
-        // Update mode button display
         const modeBtn = document.getElementById('modeBtn');
         if(data.single_player_mode) {
           modeBtn.textContent = '👤 Single Player Mode';
@@ -1641,7 +1332,6 @@ void handleRoot() {
           modeBtn.className = 'mode-toggle competition-mode';
         }
         
-        // Update instructions based on mode
         const instructionsTitle = document.getElementById('instructions-title');
         const instructionsText = document.getElementById('instructions-text');
         if(data.single_player_mode) {
@@ -1665,17 +1355,13 @@ void handleRoot() {
           `;
         }
         
-        // Update reaction times (including negative ones for false starts)
         const reactionLeftDiv = document.getElementById('reaction-time-left');
         const reactionRightDiv = document.getElementById('reaction-time-right');
         
-        // Show reaction time if it exists (not 0) OR if audio has ended (ready to show)
-        // BUT only for active sensors in single player mode
         if((!data.single_player_mode || data.left_finished || data.left_false_start || data.reaction_time_left != 0) && 
            (data.reaction_time_left != 0 || (data.elapsed_time > 0 && !data.is_playing_audio))) {
           if(data.reaction_time_left != 0) {
             reactionLeftDiv.textContent = 'Reaction: ' + data.formatted_reaction_time_left;
-            // Add special styling for negative reaction times (false starts)
             if(data.reaction_time_left < 0) {
               reactionLeftDiv.className = 'reaction-time negative';
             } else {
@@ -1694,7 +1380,6 @@ void handleRoot() {
            (data.reaction_time_right != 0 || (data.elapsed_time > 0 && !data.is_playing_audio))) {
           if(data.reaction_time_right != 0) {
             reactionRightDiv.textContent = 'Reaction: ' + data.formatted_reaction_time_right;
-            // Add special styling for negative reaction times (false starts)
             if(data.reaction_time_right < 0) {
               reactionRightDiv.className = 'reaction-time negative';
             } else {
@@ -1709,17 +1394,14 @@ void handleRoot() {
           reactionRightDiv.style.display = 'none';
         }
         
-        // Update completion times and winner highlighting
         const completionLeftDiv = document.getElementById('completion-time-left');
         const completionRightDiv = document.getElementById('completion-time-right');
         const leftPanel = document.querySelector('.left-panel');
         const rightPanel = document.querySelector('.right-panel');
         
-        // Remove winner and disqualified classes first
         leftPanel.classList.remove('winner', 'disqualified');
         rightPanel.classList.remove('winner', 'disqualified');
         
-        // Mark false start competitors as disqualified (but still show their completion time)
         if(data.left_false_start) {
           leftPanel.classList.add('disqualified');
         }
@@ -1753,9 +1435,7 @@ void handleRoot() {
           completionRightDiv.style.display = 'none';
         }
         
-        // Highlight winner only among non-disqualified competitors
         if(!data.left_false_start && !data.right_false_start) {
-          // Both competitors valid
           if(data.completion_time_left > 0 && data.completion_time_right > 0) {
             if(data.completion_time_left < data.completion_time_right) {
               leftPanel.classList.add('winner');
@@ -1768,19 +1448,15 @@ void handleRoot() {
             rightPanel.classList.add('winner');
           }
         } else if(data.left_false_start && !data.right_false_start) {
-          // Left disqualified, right wins if finished
           if(data.completion_time_right > 0) {
             rightPanel.classList.add('winner');
           }
         } else if(!data.left_false_start && data.right_false_start) {
-          // Right disqualified, left wins if finished
           if(data.completion_time_left > 0) {
             leftPanel.classList.add('winner');
           }
         }
-        // If both false started, no winner highlighting
         
-        // Update status
         const statusDiv = document.getElementById('status');
         const startBtn = document.getElementById('startBtn');
 
@@ -1864,24 +1540,20 @@ void handleApiStatus() {
   doc["right_false_start"] = rightFalseStart;
   doc["single_player_mode"] = singlePlayerMode;
 
-  // Foot sensor states
   doc["foot_left_pressed"] = footLeftPressed;
   doc["foot_right_pressed"] = footRightPressed;
   doc["both_feet_ready"] = footLeftPressed && footRightPressed;
   doc["ready_to_start"] = singlePlayerMode ? (footLeftPressed || footRightPressed) : (footLeftPressed && footRightPressed);
 
-  // Timing data
   doc["elapsed_time"] = currentElapsedTime;
   doc["formatted_time"] = formatTime(currentElapsedTime);
 
-  // Left side data (including negative reaction times)
   doc["reaction_time_left"] = reactionTimeLeft;
   doc["formatted_reaction_time_left"] = formatSignedTime(reactionTimeLeft);
   doc["completion_time_left"] = completionTimeLeft;
   doc["formatted_completion_time_left"] = formatTime(completionTimeLeft);
   doc["left_finished"] = leftFinished;
 
-  // Right side data (including negative reaction times)
   doc["reaction_time_right"] = reactionTimeRight;
   doc["formatted_reaction_time_right"] = formatSignedTime(reactionTimeRight);
   doc["completion_time_right"] = completionTimeRight;
@@ -1892,36 +1564,13 @@ void handleApiStatus() {
 
   String response;
   serializeJson(doc, response);
-
   server.send(200, "application/json", response);
 }
 
 void handleApiStart() {
-  bool canStart = false;
-
-  if (singlePlayerMode) {
-    // Single player: allow if at least one foot sensor is pressed
-    canStart = (footLeftPressed || footRightPressed) && !isPlayingAudio && !isPlayingFalseStart;
-  } else {
-    // Competition mode: require BOTH foot sensors
-    canStart = footLeftPressed && footRightPressed && !isPlayingAudio && !isPlayingFalseStart;
-  }
-
-  if (canStart) {
-    falseStartOccurred = false;
-    leftFalseStart = false;
-    rightFalseStart = false;
-    leftFootValidDuringAudio = true;
-    rightFootValidDuringAudio = true;
-    falseStartAudioPlayed = false;
-    leftFalseStartTime = 0;   // Reset false start times
-    rightFalseStartTime = 0;  // Reset false start times
-    reactionTimeLeft = 0;
-    reactionTimeRight = 0;
-    completionTimeLeft = 0;
-    completionTimeRight = 0;
-    leftFinished = false;
-    rightFinished = false;
+  if (canStartCompetition()) {
+    setLaneActivity();
+    resetCompetitionState();
     startAudioSequence();
     server.send(200, "application/json", "{\"status\":\"started\"}");
   } else if (singlePlayerMode && !footLeftPressed && !footRightPressed) {
@@ -1956,4 +1605,56 @@ void handleApiReset() {
   }
   sendWebSocketUpdate();
   server.send(200, "application/json", "{\"status\":\"reset\"}");
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(START_BUTTON, INPUT_PULLUP);
+  pinMode(STOP_SENSOR_LEFT, INPUT_PULLUP);
+  pinMode(STOP_SENSOR_RIGHT, INPUT_PULLUP);
+  pinMode(FOOT_SENSOR_LEFT, INPUT_PULLUP);
+  pinMode(FOOT_SENSOR_RIGHT, INPUT_PULLUP);
+
+  initializeLEDs();
+
+  ledcAttach(AUDIO_PIN, 1000, LEDC_RESOLUTION);
+  ledcWrite(AUDIO_PIN, 0);
+
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED && (millis() - startTime) < timeout) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("\nWiFi connection timeout!");
+  } else {
+    Serial.println("\nWiFi connected!");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+  }
+
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/api/status", HTTP_GET, handleApiStatus);
+  server.on("/api/start", HTTP_POST, handleApiStart);
+  server.on("/api/stop", HTTP_POST, handleApiStop);
+  server.on("/api/reset", HTTP_POST, handleApiReset);
+
+  webSocket.begin();
+  webSocket.onEvent(webSocketEvent);
+
+  server.begin();
+  Serial.println("HTTP server started");
+  Serial.println("WebSocket server started on port 81");
+}
+
+void loop() {
+  server.handleClient();
+  webSocket.loop();
+  checkButtons();
+  updateAudioSequence();
+  updateTimer();
+  updateWebSocket();
 }
