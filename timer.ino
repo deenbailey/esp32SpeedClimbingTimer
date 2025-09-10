@@ -21,12 +21,12 @@ CRGB ledsLeft[NUM_LEDS_PER_STRIP];
 CRGB ledsRight[NUM_LEDS_PER_STRIP];
 
 // WiFi Config
-const char* ssid = "Nacho WiFi";
-const char* password = "airforce11";
+// const char* ssid = "Nacho WiFi";
+// const char* password = "airforce11";
 
 // Gravitry Worx Wifi
-// const char* ssid = "Optus_53BE2F";
-// const char* password = "kudzuzerdauRX5r";
+const char* ssid = "Optus_53BE2F";
+const char* password = "kudzuzerdauRX5r";
 
 // Work Phone Wifi
 // const char* ssid = "IPY6J60VPXF0";
@@ -83,6 +83,10 @@ bool stopLeftPressed = false;
 bool stopRightPressed = false;
 bool footLeftPressed = false;
 bool footRightPressed = false;
+
+// grace period for false start
+unsigned long graceStartTime = 0;
+const unsigned long GRACE_PERIOD = 100; // 100ms = 0.1 seconds
 
 // False start tracking
 bool falseStartOccurred = false;
@@ -187,6 +191,7 @@ void resetCompetitionState() {
   rightFinished = false;
   resetTimeoutActive = false;
   lastEventTime = 0;
+  graceStartTime = 0; // Add this line
 }
 
 // LED Functions
@@ -314,6 +319,7 @@ void updateAudioSequence() {
     if (isPlayingAudio && currentAudioStep == 5 && sequence[currentAudioStep].frequency == 1760) {
       startTimer();
       audioEndTime = millis(); // Set this for reaction time calculations
+      graceStartTime = millis(); // Start the grace period timer
     }
     
     if (sequence[currentAudioStep].frequency > 0) {
@@ -430,44 +436,94 @@ void updateTimer() {
 
 // False Start Detection
 void checkFalseStart(bool isLeft, bool footPressed, bool footValid) {
-  if (isPlayingAudio && !isPlayingFalseStart && currentAudioStep < 5) {
-    if (singlePlayerMode) {
-      if ((isLeft && footLeftPressed && !footPressed && leftFootValidDuringAudio) ||
-          (!isLeft && footRightPressed && !footPressed && rightFootValidDuringAudio)) {
-        
-        if (isLeft) {
-          leftFootValidDuringAudio = false;
-          leftFalseStart = true;
-          leftFalseStartTime = millis();
-          setLeftLEDs(CRGB::Red);
-        } else {
-          rightFootValidDuringAudio = false;
-          rightFalseStart = true;
-          rightFalseStartTime = millis();
-          setRightLEDs(CRGB::Red);
+  if (isPlayingAudio && !isPlayingFalseStart) {
+    // If we're before step 5 (before start tone), detect false starts immediately
+    if (currentAudioStep < 5) {
+      if (singlePlayerMode) {
+        if ((isLeft && footLeftPressed && !footPressed && leftFootValidDuringAudio) ||
+            (!isLeft && footRightPressed && !footPressed && rightFootValidDuringAudio)) {
+          
+          if (isLeft) {
+            leftFootValidDuringAudio = false;
+            leftFalseStart = true;
+            leftFalseStartTime = millis();
+            setLeftLEDs(CRGB::Red);
+          } else {
+            rightFootValidDuringAudio = false;
+            rightFalseStart = true;
+            rightFalseStartTime = millis();
+            setRightLEDs(CRGB::Red);
+          }
+          
+          falseStartOccurred = true;
+          resetTimeoutActive = true;
+          lastEventTime = millis();
         }
-        
-        falseStartOccurred = true;
-        resetTimeoutActive = true;
-        lastEventTime = millis();
+      } else {
+        if ((isLeft && !footPressed && leftFootValidDuringAudio) ||
+            (!isLeft && !footPressed && rightFootValidDuringAudio)) {
+          
+          if (isLeft) {
+            leftFootValidDuringAudio = false;
+            leftFalseStart = true;
+            leftFalseStartTime = millis();
+            setLeftLEDs(CRGB::Red);
+          } else {
+            rightFootValidDuringAudio = false;
+            rightFalseStart = true;
+            rightFalseStartTime = millis();
+            setRightLEDs(CRGB::Red);
+          }
+          
+          falseStartOccurred = true;
+        }
       }
-    } else {
-      if ((isLeft && !footPressed && leftFootValidDuringAudio) ||
-          (!isLeft && !footPressed && rightFootValidDuringAudio)) {
-        
-        if (isLeft) {
-          leftFootValidDuringAudio = false;
-          leftFalseStart = true;
-          leftFalseStartTime = millis();
-          setLeftLEDs(CRGB::Red);
+    }
+    // If we're at step 5 (start tone playing), apply grace period
+    else if (currentAudioStep == 5 && graceStartTime > 0) {
+      unsigned long timeSinceGraceStart = millis() - graceStartTime;
+      
+      // Only detect false start if grace period has elapsed
+      if (timeSinceGraceStart > GRACE_PERIOD) {
+        if (singlePlayerMode) {
+          if ((isLeft && footLeftPressed && !footPressed && leftFootValidDuringAudio) ||
+              (!isLeft && footRightPressed && !footPressed && rightFootValidDuringAudio)) {
+            
+            if (isLeft) {
+              leftFootValidDuringAudio = false;
+              leftFalseStart = true;
+              leftFalseStartTime = millis();
+              setLeftLEDs(CRGB::Red);
+            } else {
+              rightFootValidDuringAudio = false;
+              rightFalseStart = true;
+              rightFalseStartTime = millis();
+              setRightLEDs(CRGB::Red);
+            }
+            
+            falseStartOccurred = true;
+            resetTimeoutActive = true;
+            lastEventTime = millis();
+          }
         } else {
-          rightFootValidDuringAudio = false;
-          rightFalseStart = true;
-          rightFalseStartTime = millis();
-          setRightLEDs(CRGB::Red);
+          if ((isLeft && !footPressed && leftFootValidDuringAudio) ||
+              (!isLeft && !footPressed && rightFootValidDuringAudio)) {
+            
+            if (isLeft) {
+              leftFootValidDuringAudio = false;
+              leftFalseStart = true;
+              leftFalseStartTime = millis();
+              setLeftLEDs(CRGB::Red);
+            } else {
+              rightFootValidDuringAudio = false;
+              rightFalseStart = true;
+              rightFalseStartTime = millis();
+              setRightLEDs(CRGB::Red);
+            }
+            
+            falseStartOccurred = true;
+          }
         }
-        
-        falseStartOccurred = true;
       }
     }
   }
