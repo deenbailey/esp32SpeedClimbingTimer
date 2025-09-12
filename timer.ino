@@ -339,27 +339,9 @@ void updateAudioSequence() {
   }
 }
 
-void calculateNegativeReactionTime(bool isLeft) {
-  // Calculate when the 1760Hz tone should start based on the sequence timing
-  unsigned long tone1760ShouldStart = audioSequenceStartTime + 500 + 250 + 750 + 250 + 750;
-
-  if (isLeft && leftFalseStart && leftFalseStartTime > 0) {
-    reactionTimeLeft = (long)leftFalseStartTime - (long)tone1760ShouldStart;
-  }
-  if (!isLeft && rightFalseStart && rightFalseStartTime > 0) {
-    reactionTimeRight = (long)rightFalseStartTime - (long)tone1760ShouldStart;
-  }
-}
-
 void completeAudioSequence() {
   isPlayingAudio = false;
   currentAudioStep = 0;
-
-  // Remove this line since timer already started:
-  // audioEndTime = millis();
-
-  calculateNegativeReactionTime(true);
-  calculateNegativeReactionTime(false);
 
   if (falseStartOccurred && !falseStartAudioPlayed) {
     falseStartAudioPlayed = true;
@@ -439,28 +421,6 @@ void resetTimer() {
 void updateTimer() {
   if (isAnyTimerRunning()) {
     currentElapsedTime = millis() - timerStartTime;
-  }
-}
-
-// False Start Detection
-// Reaction Time Calculation
-void calculateReactionTime(bool isLeft) {
-  if ((currentAudioStep >= 5 || audioEndTime > 0) && ((isLeft && reactionTimeLeft == 0 && !leftFalseStart) || (!isLeft && reactionTimeRight == 0 && !rightFalseStart))) {
-
-    long reactionTime;
-    if (audioEndTime > 0) {
-      reactionTime = millis() - audioEndTime;
-    } else {
-      reactionTime = millis() - audioStepStartTime;
-    }
-
-    if (isLeft) {
-      reactionTimeLeft = reactionTime;
-    } else {
-      reactionTimeRight = reactionTime;
-    }
-
-    sendWebSocketUpdate();
   }
 }
 
@@ -1690,8 +1650,8 @@ void setup() {
 }
 
 void loop() {
-  // unsigned long loopStart = millis();
-  // loopCount++;
+  unsigned long loopStart = millis();
+  loopCount++;
 
   server.handleClient();
   webSocket.loop();
@@ -1700,17 +1660,17 @@ void loop() {
   updateTimer();
   updateWebSocket();
 
-  // lastLoopTime = millis() - loopStart;
+  lastLoopTime = millis() - loopStart;
 
-  // // Display stats every second
-  // if (millis() - lastTime >= 1000) {
-  //   Serial.print("Loops/sec: ");
-  //   Serial.print(loopCount);
-  //   Serial.print(" | Last loop took: ");
-  //   Serial.print(lastLoopTime);
-  //   Serial.println(" ms");
+  // Display stats every second
+  if (millis() - lastTime >= 1000) {
+    Serial.print("Loops/sec: ");
+    Serial.print(loopCount);
+    Serial.print(" | Last loop took: ");
+    Serial.print(lastLoopTime);
+    Serial.println(" ms");
 
-  //   loopCount = 0;
-  //   lastTime = millis();
-  // }
+    loopCount = 0;
+    lastTime = millis();
+  }
 }
