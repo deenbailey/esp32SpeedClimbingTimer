@@ -2116,14 +2116,14 @@ void setup() {
   server.on("/api/reset", HTTP_POST, handleApiReset);
   server.on("/api/toggle_kids_mode", HTTP_POST, handleApiToggleKidsMode);
 
-  server.on("/generate_204", HTTP_GET, handleCaptivePortal);  // Android
-  server.on("/fwlink", HTTP_GET, handleCaptivePortal);        // Microsoft
-  server.on("/hotspot-detect.html", HTTP_GET, handleCaptivePortal); // Apple
-  server.onNotFound(handleCaptivePortal);  // Catch all other requests
+  server.on("/generate_204", HTTP_GET, handleCaptivePortal);         // Android
+  server.on("/fwlink", HTTP_GET, handleCaptivePortal);               // Microsoft
+  server.on("/hotspot-detect.html", HTTP_GET, handleCaptivePortal);  // Apple
+  server.onNotFound(handleCaptivePortal);                            // Catch all other requests
 
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
-  webSocket.enableHeartbeat(1000, 500, 2); // ping every 15s, timeout 3s, disconnect after 2 failed pings
+  webSocket.enableHeartbeat(1000, 500, 2);  // ping every 15s, timeout 3s, disconnect after 2 failed pings
 
   server.begin();
   Serial.println("HTTP server started");
@@ -2146,13 +2146,15 @@ void loop() {
   // Display stats every second and checks dns (10 times per second)
   if (millis() - lastTime >= 100) {
     dnsServer.processNextRequest();
-    Serial.print("Loops/sec: ");
-    Serial.print(loopCount);
-    Serial.print(" | Last loop took: ");
-    Serial.print(lastLoopTime);
-    Serial.println(" ms");
+    if (loopCount < 80) {
+      Serial.print("Loops/sec: ");
+      Serial.print(loopCount);
+      Serial.print(" | Last loop took: ");
+      Serial.print(lastLoopTime);
+      Serial.println(" ms");
 
-    loopCount = 0;
-    lastTime = millis();
+      loopCount = 0;
+      lastTime = millis();
+    }
   }
 }
