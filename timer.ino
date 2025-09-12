@@ -20,6 +20,11 @@
 CRGB ledsLeft[NUM_LEDS_PER_STRIP];
 CRGB ledsRight[NUM_LEDS_PER_STRIP];
 
+//loop check
+unsigned long loopCount = 0;
+unsigned long lastTime = 0;
+unsigned long lastLoopTime = 0;
+
 // WiFi Config
 const char* ssid = "Nacho WiFi";
 const char* password = "airforce11";
@@ -36,6 +41,15 @@ const char* password = "airforce11";
 // const char* ssid = "Deen";
 // const char* password = "password";
 
+// Temperature and Memory Monitoring
+unsigned long lastTempCheck = 0;
+unsigned long lastMemoryCheck = 0;
+float currentTemperature = 0.0;
+uint32_t currentFreeHeap = 0;
+uint32_t minFreeHeap = 0;
+#define TEMP_CHECK_INTERVAL 5000    // Check every 30 seconds
+#define MEMORY_CHECK_INTERVAL 1000  // Check every 10 seconds
+
 // Audio Config
 #define LEDC_CHANNEL 0
 #define LEDC_RESOLUTION 8
@@ -50,10 +64,7 @@ const AudioStep audioSequence[] = {
 };
 
 const AudioStep falseStartSequence[] = {
-  { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 },
-  { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 },
-  { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 },
-  { 1568, 100 }, { 0, 100 }
+  { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }
 };
 
 const int AUDIO_SEQUENCE_LENGTH = sizeof(audioSequence) / sizeof(AudioStep);
@@ -133,7 +144,7 @@ const unsigned long RESET_TIMEOUT = 1300;
 unsigned long lastButtonCheck = 0;
 unsigned long lastWebSocketUpdate = 0;
 const unsigned long BUTTON_DEBOUNCE = 10;
-const unsigned long WEBSOCKET_UPDATE_INTERVAL = 50;
+const unsigned long WEBSOCKET_UPDATE_INTERVAL = 51;
 
 // Auto-start
 unsigned long footPressStartTime = 0;
@@ -240,7 +251,7 @@ void startAudioSequence() {
   audioSequenceStartTime = millis();
   setLeftLEDs(CRGB::Black);
   setRightLEDs(CRGB::Black);
-  
+
   if (audioSequence[0].frequency > 0) {
     playTone(audioSequence[0].frequency);
   } else {
@@ -252,7 +263,7 @@ void startFalseStartSequence() {
   isPlayingFalseStart = true;
   currentAudioStep = 0;
   audioStepStartTime = millis();
-  
+
   if (falseStartSequence[0].frequency > 0) {
     playTone(falseStartSequence[0].frequency);
   } else {
@@ -309,13 +320,13 @@ void updateAudioSequence() {
     }
 
     audioStepStartTime = currentTime;
-    
+
     // START TIMER WHEN 1760Hz TONE BEGINS (step 5 in the sequence)
     if (isPlayingAudio && currentAudioStep == 5 && sequence[currentAudioStep].frequency == 1760) {
       startTimer();
-      audioEndTime = millis(); // Set this for reaction time calculations
+      audioEndTime = millis();  // Set this for reaction time calculations
     }
-    
+
     if (sequence[currentAudioStep].frequency > 0) {
       playTone(sequence[currentAudioStep].frequency);
       handleAudioLEDs(sequence, sequence[currentAudioStep].frequency);
@@ -327,9 +338,9 @@ void updateAudioSequence() {
 }
 
 void calculateNegativeReactionTime(bool isLeft) {
-// Calculate when the 1760Hz tone should start based on the sequence timing
+  // Calculate when the 1760Hz tone should start based on the sequence timing
   unsigned long tone1760ShouldStart = audioSequenceStartTime + 500 + 250 + 750 + 250 + 750;
-  
+
   if (isLeft && leftFalseStart && leftFalseStartTime > 0) {
     reactionTimeLeft = (long)leftFalseStartTime - (long)tone1760ShouldStart;
   }
@@ -341,7 +352,7 @@ void calculateNegativeReactionTime(bool isLeft) {
 void completeAudioSequence() {
   isPlayingAudio = false;
   currentAudioStep = 0;
-  
+
   // Remove this line since timer already started:
   // audioEndTime = millis();
 
@@ -432,9 +443,8 @@ void updateTimer() {
 void checkFalseStart(bool isLeft, bool footPressed, bool footValid) {
   if (isPlayingAudio && !isPlayingFalseStart && currentAudioStep < 5) {
     if (singlePlayerMode) {
-      if ((isLeft && footLeftPressed && !footPressed && leftFootValidDuringAudio) ||
-          (!isLeft && footRightPressed && !footPressed && rightFootValidDuringAudio)) {
-        
+      if ((isLeft && footLeftPressed && !footPressed && leftFootValidDuringAudio) || (!isLeft && footRightPressed && !footPressed && rightFootValidDuringAudio)) {
+
         if (isLeft) {
           leftFootValidDuringAudio = false;
           leftFalseStart = true;
@@ -446,15 +456,14 @@ void checkFalseStart(bool isLeft, bool footPressed, bool footValid) {
           rightFalseStartTime = millis();
           setRightLEDs(CRGB::Red);
         }
-        
+
         falseStartOccurred = true;
         resetTimeoutActive = true;
         lastEventTime = millis();
       }
     } else {
-      if ((isLeft && !footPressed && leftFootValidDuringAudio) ||
-          (!isLeft && !footPressed && rightFootValidDuringAudio)) {
-        
+      if ((isLeft && !footPressed && leftFootValidDuringAudio) || (!isLeft && !footPressed && rightFootValidDuringAudio)) {
+
         if (isLeft) {
           leftFootValidDuringAudio = false;
           leftFalseStart = true;
@@ -466,7 +475,7 @@ void checkFalseStart(bool isLeft, bool footPressed, bool footValid) {
           rightFalseStartTime = millis();
           setRightLEDs(CRGB::Red);
         }
-        
+
         falseStartOccurred = true;
       }
     }
@@ -475,23 +484,21 @@ void checkFalseStart(bool isLeft, bool footPressed, bool footValid) {
 
 // Reaction Time Calculation
 void calculateReactionTime(bool isLeft) {
-  if ((currentAudioStep >= 5 || audioEndTime > 0) && 
-      ((isLeft && reactionTimeLeft == 0 && !leftFalseStart) ||
-       (!isLeft && reactionTimeRight == 0 && !rightFalseStart))) {
-    
+  if ((currentAudioStep >= 5 || audioEndTime > 0) && ((isLeft && reactionTimeLeft == 0 && !leftFalseStart) || (!isLeft && reactionTimeRight == 0 && !rightFalseStart))) {
+
     long reactionTime;
     if (audioEndTime > 0) {
       reactionTime = millis() - audioEndTime;
     } else {
       reactionTime = millis() - audioStepStartTime;
     }
-    
+
     if (isLeft) {
       reactionTimeLeft = reactionTime;
     } else {
       reactionTimeRight = reactionTime;
     }
-    
+
     sendWebSocketUpdate();
   }
 }
@@ -695,14 +702,9 @@ void handleStopSensor(bool isLeft) {
 bool hasStateChanged() {
   bool footSensorChanged = (footLeftPressed != lastFootLeftPressed || footRightPressed != lastFootRightPressed);
   bool timerStateChanged = (isTimerRunningLeft != lastTimerRunningLeft || isTimerRunningRight != lastTimerRunningRight);
-  bool leftLaneStateChanged = (!singlePlayerMode || leftLaneActive) && 
-    (leftFalseStart != lastLeftFalseStart || leftFinished != lastLeftFinished || 
-     reactionTimeLeft != lastReactionTimeLeft || completionTimeLeft != lastCompletionTimeLeft);
-  bool rightLaneStateChanged = (!singlePlayerMode || rightLaneActive) && 
-    (rightFalseStart != lastRightFalseStart || rightFinished != lastRightFinished || 
-     reactionTimeRight != lastReactionTimeRight || completionTimeRight != lastCompletionTimeRight);
-  bool otherStateChanged = (isPlayingAudio != lastPlayingAudio || isPlayingFalseStart != lastPlayingFalseStart || 
-    falseStartOccurred != lastFalseStartOccurred || singlePlayerMode != lastSinglePlayerMode);
+  bool leftLaneStateChanged = (!singlePlayerMode || leftLaneActive) && (leftFalseStart != lastLeftFalseStart || leftFinished != lastLeftFinished || reactionTimeLeft != lastReactionTimeLeft || completionTimeLeft != lastCompletionTimeLeft);
+  bool rightLaneStateChanged = (!singlePlayerMode || rightLaneActive) && (rightFalseStart != lastRightFalseStart || rightFinished != lastRightFinished || reactionTimeRight != lastReactionTimeRight || completionTimeRight != lastCompletionTimeRight);
+  bool otherStateChanged = (isPlayingAudio != lastPlayingAudio || isPlayingFalseStart != lastPlayingFalseStart || falseStartOccurred != lastFalseStartOccurred || singlePlayerMode != lastSinglePlayerMode);
 
   return footSensorChanged || timerStateChanged || leftLaneStateChanged || rightLaneStateChanged || otherStateChanged;
 }
@@ -727,19 +729,21 @@ void updateLastState() {
 }
 
 void updateWebSocket() {
+  unsigned long currentTime = millis();
+
   bool shouldUpdate = false;
 
   if (singlePlayerMode) {
-    shouldUpdate = (leftLaneActive && isTimerRunningLeft) || (rightLaneActive && isTimerRunningRight) || 
-                   isPlayingAudio || isPlayingFalseStart || hasStateChanged();
+    shouldUpdate = (leftLaneActive && isTimerRunningLeft) || (rightLaneActive && isTimerRunningRight) || isPlayingAudio || isPlayingFalseStart || hasStateChanged();
   } else {
     shouldUpdate = isAnyTimerRunning() || isPlayingAudio || isPlayingFalseStart || hasStateChanged();
   }
 
-  if (shouldUpdate) {
+  // Only send update if shouldUpdate is true AND at least WEBSOCKET_UPDATE_INTERVAL ms have passed
+  if (shouldUpdate && (currentTime - lastWebSocketUpdate >= WEBSOCKET_UPDATE_INTERVAL)) {
     sendWebSocketUpdate();
     updateLastState();
-    lastWebSocketUpdate = millis();
+    lastWebSocketUpdate = currentTime;
   }
 }
 
@@ -1572,6 +1576,11 @@ void handleApiStatus() {
   doc["formatted_completion_time_right"] = formatTime(completionTimeRight);
   doc["right_finished"] = rightFinished;
 
+  doc["temperature"] = currentTemperature;
+  doc["free_heap"] = currentFreeHeap;
+  doc["min_free_heap"] = minFreeHeap;
+  doc["heap_size"] = ESP.getHeapSize();
+
   doc["uptime"] = millis();
 
   String response;
@@ -1619,6 +1628,41 @@ void handleApiReset() {
   server.send(200, "application/json", "{\"status\":\"reset\"}");
 }
 
+void checkTemperature() {
+  if (millis() - lastTempCheck >= TEMP_CHECK_INTERVAL) {
+    currentTemperature = temperatureRead();
+    Serial.printf("Temperature: %.2f°C\n", currentTemperature);
+    if (currentTemperature > 70.0) {
+      Serial.printf("WARNING: High temperature: %.2f°C\n", currentTemperature);
+    }
+    lastTempCheck = millis();
+  }
+}
+
+void checkMemoryLeak() {
+  if (millis() - lastMemoryCheck >= MEMORY_CHECK_INTERVAL) {
+    uint32_t freeHeap = ESP.getFreeHeap();
+    uint32_t minHeap = ESP.getMinFreeHeap();
+
+    if (currentFreeHeap > 0 && freeHeap < currentFreeHeap - 20000) {
+      Serial.printf("MEMORY LEAK DETECTED: Free heap dropped from %u to %u bytes\n",
+                    currentFreeHeap, freeHeap);
+    }
+
+    if (freeHeap < 10000) {
+      Serial.printf("WARNING: Low memory: %u bytes free\n", freeHeap);
+    }
+
+    currentFreeHeap = freeHeap;
+    if (minHeap < minFreeHeap || minFreeHeap == 0) {
+      minFreeHeap = minHeap;
+    }
+
+    Serial.printf("Memory: Free=%u, Min=%u, Size=%u\n", freeHeap, minHeap, ESP.getHeapSize());
+    lastMemoryCheck = millis();
+  }
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -1663,10 +1707,31 @@ void setup() {
 }
 
 void loop() {
+  unsigned long loopStart = micros();
+  loopCount++;
+
   server.handleClient();
   webSocket.loop();
   checkButtons();
   updateAudioSequence();
   updateTimer();
   updateWebSocket();
+
+  // mem / temp checks
+  checkTemperature();
+  checkMemoryLeak();
+
+  lastLoopTime = micros() - loopStart;
+
+  // Display stats every second
+  if (millis() - lastTime >= 1000) {
+    Serial.print("Loops/sec: ");
+    Serial.print(loopCount);
+    Serial.print(" | Last loop took: ");
+    Serial.print(lastLoopTime);
+    Serial.println(" μs");
+
+    loopCount = 0;
+    lastTime = millis();
+  }
 }
