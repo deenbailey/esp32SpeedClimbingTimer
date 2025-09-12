@@ -1306,7 +1306,7 @@ void handleRoot() {
         <button onclick='startSequence()' id='startBtn'>🚀 Start Competition</button>
         <button onclick='resetTimer()' id='resetBtn'>🔄 Reset</button>
         <button onclick='toggleMode()' id='modeBtn' class='mode-toggle competition-mode'>🏆 Competition Mode</button>
-        <button onclick='toggleKidsMode()' id='kidsModeBtn' class='kids-mode-toggle disabled'>👶 Kids Sensors: OFF</button>
+        <button onclick='toggleKidsMode()' id='kidsModeBtn' class='kids-mode-toggle disabled'>🤸 Kids Sensors: OFF</button>
       </div>
       
       <div class='instructions'>
@@ -1397,10 +1397,10 @@ void handleRoot() {
 
         const kidsModeBtn = document.getElementById('kidsModeBtn');
         if(data.kids_mode_sensors_enabled) {
-          kidsModeBtn.textContent = '👶 Kids Sensors: ON';
+          kidsModeBtn.textContent = '🤸 Kids Sensors: ON';
           kidsModeBtn.className = 'kids-mode-toggle enabled';
         } else {
-          kidsModeBtn.textContent = '👶 Kids Sensors: OFF';
+          kidsModeBtn.textContent = '🤸 Kids Sensors: OFF';
           kidsModeBtn.className = 'kids-mode-toggle disabled';
         }
         
