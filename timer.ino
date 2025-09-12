@@ -3,6 +3,8 @@
 #include <ArduinoJson.h>
 #include <WebSocketsServer.h>
 #include <FastLED.h>
+#include "SPIFFS.h"
+#include "FS.h"
 
 // Hardware Config
 #define START_BUTTON 19
@@ -43,6 +45,13 @@ const char* password = "airforce11";
 // Dean Phone Wifi
 // const char* ssid = "Deen";
 // const char* password = "password";
+
+struct HighScoreEntry {
+  unsigned long completionTime;
+  long reactionTime;
+  unsigned long timestamp;
+  char name[32]; // 31 chars + null terminator for full names
+};
 
 //loop check
 unsigned long loopCount = 0;
@@ -795,6 +804,7 @@ void sendWebSocketUpdate() {
   doc["reaction_time_right"] = rightReactionCalculated ? rightReactionTime : 0;
   doc["formatted_reaction_time_right"] = formatSignedTime(rightReactionCalculated ? rightReactionTime : 0);
   doc["kids_mode_sensors_enabled"] = kidsModeSensorsEnabled;
+  doc["competition_complete"] = (leftFinished || rightFinished) && !isAnyTimerRunning();
 
   doc["uptime"] = millis();
 
@@ -1140,7 +1150,137 @@ void handleRoot() {
       border: 1px solid rgba(255,255,255,0.25);
       box-shadow: 0 6px 20px rgba(0,0,0,0.15);
       line-height: 1.4;
+      display: none; /* Hidden by default */
+      grid-column: 1 / -1;
     }
+        
+    .help-button {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(37, 99, 235, 0.4));
+      border: 2px solid rgba(59, 130, 246, 0.6);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: bold;
+      transition: all 0.3s ease;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+      width: 100%;
+      max-width: 120px;
+      min-height: 36px;
+    }
+    .help-button:hover {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(37, 99, 235, 0.5));
+      transform: translateY(-1px);
+      box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+    }
+    
+    /* Times Log Styles */
+    .times-log {
+      background: linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+      padding: 20px;
+      border-radius: 15px;
+      margin: 30px 0 0 0;
+      border: 1px solid rgba(255,255,255,0.25);
+      box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+    }
+    
+    .log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+    
+    .log-controls button {
+      font-size: 12px;
+      padding: 8px 16px;
+      margin-left: 10px;
+      max-width: none;
+      width: auto;
+    }
+    
+    .log-entry {
+      background: rgba(255,255,255,0.1);
+      padding: 12px;
+      margin: 8px 0;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.2);
+      font-size: 0.9em;
+    }
+    
+    .log-entry.winner-left {
+      border-left: 4px solid #4CAF50;
+    }
+    
+    .log-entry.winner-right {
+      border-left: 4px solid #2196F3;
+    }
+    
+    .log-entry.single-player {
+      border-left: 4px solid #FF9800;
+    }
+    
+    .log-entry-header {
+      font-weight: bold;
+      margin-bottom: 5px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .log-times {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    
+    .log-time {
+      background: rgba(0,0,0,0.2);
+      padding: 6px;
+      border-radius: 4px;
+      text-align: center;
+    }
+    
+    .log-time.false-start {
+      background: rgba(220,38,38,0.3);
+      color: #ff8a80;
+    }
+    
+    .empty-log {
+      text-align: center;
+      color: rgba(255,255,255,0.7);
+      font-style: italic;
+      padding: 20px;
+    }
+    
+    .kids-mode-toggle {
+        background: rgba(255,255,255,0.15);
+        border: 2px solid rgba(255,255,255,0.4);
+        padding: 12px 24px;
+        border-radius: 30px;
+        font-size: 14px;
+        font-weight: bold;
+        position: relative;
+        overflow: hidden;
+        transition: all 0.4s ease;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+        width: 100%;
+        max-width: 240px;
+      }
+      .kids-mode-toggle.enabled {
+        background: linear-gradient(135deg, #FF6B35, #FF8E53);
+        border-color: #FF5722;
+        box-shadow: 0 6px 20px rgba(255, 107, 53, 0.5);
+      }
+      .kids-mode-toggle.disabled {
+        background: linear-gradient(135deg, #666, #888);
+        border-color: #555;
+        box-shadow: 0 6px 20px rgba(102, 102, 102, 0.3);
+      }
+      .kids-mode-toggle:hover {
+        transform: translateY(-2px) scale(1.02);
+        box-shadow: 0 8px 25px rgba(255,255,255,0.3);
+      }
     
     @media (min-width: 768px) {
       body {
@@ -1173,6 +1313,10 @@ void handleRoot() {
         font-size: 0.9em;
       }
       
+      .times-log {
+        grid-column: 1 / -1;
+      }
+      
       .timer-display {
         font-size: 3.6em;
         padding: 25px;
@@ -1199,6 +1343,11 @@ void handleRoot() {
       
       .mode-toggle {
         width: auto;
+      }
+      
+      .help-button {
+        max-width: 150px;
+        font-size: 14px;
       }
     }
     
@@ -1248,35 +1397,18 @@ void handleRoot() {
       .climber-panel {
         padding: 15px;
       }
+      
+      .log-times {
+        grid-template-columns: 1fr;
+      }
+      
+      .help-button {
+        font-size: 11px;
+        padding: 6px 12px;
+        max-width: 100px;
+        min-height: 32px;
+      }
     }
-    .kids-mode-toggle {
-        background: rgba(255,255,255,0.15);
-        border: 2px solid rgba(255,255,255,0.4);
-        padding: 12px 24px;
-        border-radius: 30px;
-        font-size: 14px;
-        font-weight: bold;
-        position: relative;
-        overflow: hidden;
-        transition: all 0.4s ease;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.4);
-        width: 100%;
-        max-width: 240px;
-      }
-      .kids-mode-toggle.enabled {
-        background: linear-gradient(135deg, #FF6B35, #FF8E53);
-        border-color: #FF5722;
-        box-shadow: 0 6px 20px rgba(255, 107, 53, 0.5);
-      }
-      .kids-mode-toggle.disabled {
-        background: linear-gradient(135deg, #666, #888);
-        border-color: #555;
-        box-shadow: 0 6px 20px rgba(102, 102, 102, 0.3);
-      }
-      .kids-mode-toggle:hover {
-        transform: translateY(-2px) scale(1.02);
-        box-shadow: 0 8px 25px rgba(255,255,255,0.3);
-      }
   </style>
 </head>
 <body>
@@ -1307,9 +1439,10 @@ void handleRoot() {
         <button onclick='resetTimer()' id='resetBtn'>🔄 Reset</button>
         <button onclick='toggleMode()' id='modeBtn' class='mode-toggle competition-mode'>🏆 Competition Mode</button>
         <button onclick='toggleKidsMode()' id='kidsModeBtn' class='kids-mode-toggle disabled'>🤸 Kids Sensors: OFF</button>
+        <button onclick='toggleHelp()' id='helpBtn' class='help-button'>❓ Help</button>
       </div>
       
-      <div class='instructions'>
+      <div class='instructions' id='instructions'>
         <strong id='instructions-title'>Single Player Instructions:</strong><br>
         <span id='instructions-text'>
           1. Press and hold <b>ONE</b> foot sensor<br>
@@ -1317,20 +1450,231 @@ void handleRoot() {
           3. Keep foot sensor pressed during entire audio countdown<br>
           4. Start climbing on the high picthed start tone<br>
           5. Hit your stop sensor when you reach the top<br>
+          False starts as per IFSC are calucated at 0.1 seconds after the start tone sounds
         </span>
+      </div>
+      
+      <!-- Times Log Section -->
+      <div class='times-log'>
+        <div class='log-header'>
+          <h2>Times Log</h2>
+          <div class='log-controls'>
+            <button onclick='clearLog()'>Clear Log</button>
+            <button onclick='exportLog()'>Export CSV</button>
+          </div>
+        </div>
+        <div id='log-entries'>
+          <div class='empty-log'>No times recorded yet. Complete a competition to see results here.</div>
+        </div>
       </div>
     </div>
   </div>
 
   <script>
     let ws;
+    let timesLog = [];
+    let lastCompetitionComplete = false;
+    let helpVisible = false;
+
+    // Toggle help instructions
+    function toggleHelp() {
+      const instructionsDiv = document.getElementById('instructions');
+      const helpBtn = document.getElementById('helpBtn');
+      
+      helpVisible = !helpVisible;
+      
+      if (helpVisible) {
+        instructionsDiv.style.display = 'block';
+        helpBtn.textContent = '❌ Hide Help';
+      } else {
+        instructionsDiv.style.display = 'none';
+        helpBtn.textContent = '❓ Help';
+      }
+    }
+
+    // Load saved log from localStorage
+    function loadLog() {
+      const saved = localStorage.getItem('gravityWorxTimesLog');
+      if (saved) {
+        timesLog = JSON.parse(saved);
+        renderLog();
+      }
+    }
+
+    // Save log to localStorage
+    function saveLog() {
+      localStorage.setItem('gravityWorxTimesLog', JSON.stringify(timesLog));
+    }
+
+    // Add entry to log
+    function addLogEntry(data) {
+      const timestamp = new Date();
+      const entry = {
+        timestamp: timestamp.toISOString(),
+        date: timestamp.toLocaleDateString(),
+        time: timestamp.toLocaleTimeString(),
+        singlePlayerMode: data.single_player_mode,
+        leftTime: data.completion_time_left || 0,
+        rightTime: data.completion_time_right || 0,
+        leftReaction: data.reaction_time_left || 0,
+        rightReaction: data.reaction_time_right || 0,
+        leftFalseStart: data.left_false_start || false,
+        rightFalseStart: data.right_false_start || false,
+        leftFinished: data.left_finished || false,
+        rightFinished: data.right_finished || false,
+        formattedLeftTime: data.formatted_completion_time_left || '0:00.000',
+        formattedRightTime: data.formatted_completion_time_right || '0:00.000',
+        formattedLeftReaction: data.formatted_reaction_time_left || '0:00.000',
+        formattedRightReaction: data.formatted_reaction_time_right || '0:00.000'
+      };
+
+      timesLog.unshift(entry); // Add to beginning
+      if (timesLog.length > 100) { // Keep only last 100 entries
+        timesLog = timesLog.slice(0, 100);
+      }
+      
+      saveLog();
+      renderLog();
+    }
+
+    // Render log entries
+    function renderLog() {
+      const logContainer = document.getElementById('log-entries');
+      
+      if (timesLog.length === 0) {
+        logContainer.innerHTML = '<div class="empty-log">No times recorded yet. Complete a competition to see results here.</div>';
+        return;
+      }
+
+      let html = '';
+      timesLog.forEach((entry, index) => {
+        let entryClass = 'log-entry';
+        let winner = '';
+        
+        if (entry.singlePlayerMode) {
+          entryClass += ' single-player';
+          if (entry.leftFinished && !entry.leftFalseStart) {
+            winner = 'Left Climber';
+          } else if (entry.rightFinished && !entry.rightFalseStart) {
+            winner = 'Right Climber';
+          }
+        } else {
+          // Determine winner in competition mode
+          if (entry.leftFalseStart && !entry.rightFalseStart && entry.rightFinished) {
+            entryClass += ' winner-right';
+            winner = 'Right Climber (Left DQ)';
+          } else if (entry.rightFalseStart && !entry.leftFalseStart && entry.leftFinished) {
+            entryClass += ' winner-left';
+            winner = 'Left Climber (Right DQ)';
+          } else if (!entry.leftFalseStart && !entry.rightFalseStart) {
+            if (entry.leftFinished && entry.rightFinished) {
+              if (entry.leftTime < entry.rightTime) {
+                entryClass += ' winner-left';
+                winner = 'Left Climber';
+              } else if (entry.rightTime < entry.leftTime) {
+                entryClass += ' winner-right';
+                winner = 'Right Climber';
+              } else {
+                winner = 'Tie';
+              }
+            } else if (entry.leftFinished) {
+              entryClass += ' winner-left';
+              winner = 'Left Climber';
+            } else if (entry.rightFinished) {
+              entryClass += ' winner-right';
+              winner = 'Right Climber';
+            }
+          }
+        }
+
+        html += `
+          <div class="${entryClass}">
+            <div class="log-entry-header">
+              <span>${entry.date} ${entry.time} - ${entry.singlePlayerMode ? 'Single Player' : 'Competition'}</span>
+              ${winner ? `<span>🏆 ${winner}</span>` : ''}
+            </div>
+            <div class="log-times">
+              <div class="log-time ${entry.leftFalseStart ? 'false-start' : ''}">
+                <strong>Left:</strong><br>
+                Time: ${entry.leftFinished ? entry.formattedLeftTime : 'DNF'}${entry.leftFalseStart ? ' (DQ)' : ''}<br>
+                Reaction: ${entry.formattedLeftReaction}
+              </div>
+              <div class="log-time ${entry.rightFalseStart ? 'false-start' : ''}">
+                <strong>Right:</strong><br>
+                Time: ${entry.rightFinished ? entry.formattedRightTime : 'DNF'}${entry.rightFalseStart ? ' (DQ)' : ''}<br>
+                Reaction: ${entry.formattedRightReaction}
+              </div>
+            </div>
+          </div>
+        `;
+      });
+      
+      logContainer.innerHTML = html;
+    }
+
+    // Clear log
+    function clearLog() {
+      if (confirm('Are you sure you want to clear all logged times? This cannot be undone.')) {
+        timesLog = [];
+        saveLog();
+        renderLog();
+      }
+    }
+
+    // Export log as CSV
+    function exportLog() {
+      if (timesLog.length === 0) {
+        alert('No data to export.');
+        return;
+      }
+
+      let csv = 'Date,Time,Mode,Left Time,Left Reaction,Left False Start,Right Time,Right Reaction,Right False Start,Winner\n';
+      
+      timesLog.forEach(entry => {
+        const leftTime = entry.leftFinished ? entry.leftTime : '';
+        const rightTime = entry.rightFinished ? entry.rightTime : '';
+        let winner = '';
+        
+        if (entry.singlePlayerMode) {
+          if (entry.leftFinished && !entry.leftFalseStart) winner = 'Left';
+          else if (entry.rightFinished && !entry.rightFalseStart) winner = 'Right';
+        } else {
+          if (entry.leftFalseStart && !entry.rightFalseStart && entry.rightFinished) winner = 'Right';
+          else if (entry.rightFalseStart && !entry.leftFalseStart && entry.leftFinished) winner = 'Left';
+          else if (!entry.leftFalseStart && !entry.rightFalseStart && entry.leftFinished && entry.rightFinished) {
+            winner = entry.leftTime < entry.rightTime ? 'Left' : entry.rightTime < entry.leftTime ? 'Right' : 'Tie';
+          } else if (entry.leftFinished) winner = 'Left';
+          else if (entry.rightFinished) winner = 'Right';
+        }
+        
+        csv += `"${entry.date}","${entry.time}","${entry.singlePlayerMode ? 'Single' : 'Competition'}",${leftTime},${entry.leftReaction},${entry.leftFalseStart},${rightTime},${entry.rightReaction},${entry.rightFalseStart},"${winner}"\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `gravity-worx-times-${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    }
+
     function toggleKidsMode() { ws.send('toggle_kids_mode'); }
+    
     function connectWebSocket() {
       const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(protocol + '://' + location.hostname + ':81');
       ws.onopen = function() { console.log('WebSocket connected'); };
       ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
+        
+        // Check if competition just completed and auto-save
+        if (data.competition_complete && !lastCompetitionComplete) {
+          if (data.completion_time_left > 0 || data.completion_time_right > 0) {
+            addLogEntry(data);
+          }
+        }
+        lastCompetitionComplete = data.competition_complete;
         
         const leftTimer = document.getElementById('timer-left');
         const rightTimer = document.getElementById('timer-right');
@@ -1414,6 +1758,7 @@ void handleRoot() {
             3. Keep foot sensor pressed during entire audio countdown<br>
             4. Start climbing on the high picthed start tone<br>
             5. Hit your stop sensor when you reach the top<br>
+            False starts as per IFSC are calucated at 0.1 seconds after the start tone sounds
           `;
         } else {
           instructionsTitle.textContent = 'Competition Instructions:';
@@ -1423,7 +1768,8 @@ void handleRoot() {
             3. Keep foot sensors pressed during entire audio countdown<br>
             4. Start climbing on the high picthed start tone<br>
             5. Hit your stop sensor when you reach the top<br>
-            <strong>Both climbers can still finish even if one false starts</strong>
+            False starts as per IFSC are calucated at 0.1 seconds after the start tone sounds<br>
+            <strong>Both climbers can still finish even if one false starts</strong><br>
           `;
         }
         
@@ -1592,6 +1938,8 @@ void handleRoot() {
     function resetTimer() { ws.send('reset'); }
     function toggleMode() { ws.send('toggle_mode'); }
 
+    // Load log on page load
+    loadLog();
     connectWebSocket();
   </script>
 </body>
