@@ -1505,7 +1505,7 @@ void handleRoot() {
         color: #ff8a80;
         font-weight: bold;
         padding: 8px 16px;
-        margin: 8px 0;
+        margin: 8px auto;
         border-radius: 8px;
         font-size: 0.9em;
         width: 100%;
