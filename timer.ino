@@ -3,8 +3,6 @@
 #include <ArduinoJson.h>
 #include <WebSocketsServer.h>
 #include <FastLED.h>
-#include "SPIFFS.h"
-#include "FS.h"
 
 // Hardware Config
 #define START_BUTTON 19
@@ -45,13 +43,6 @@ const char* password = "airforce11";
 // Dean Phone Wifi
 // const char* ssid = "Deen";
 // const char* password = "password";
-
-struct HighScoreEntry {
-  unsigned long completionTime;
-  long reactionTime;
-  unsigned long timestamp;
-  char name[32]; // 31 chars + null terminator for full names
-};
 
 //loop check
 unsigned long loopCount = 0;
