@@ -133,7 +133,7 @@ const unsigned long RESET_TIMEOUT = 1300;
 unsigned long lastButtonCheck = 0;
 unsigned long lastWebSocketUpdate = 0;
 const unsigned long BUTTON_DEBOUNCE = 10;
-const unsigned long WEBSOCKET_UPDATE_INTERVAL = 50;
+const unsigned long WEBSOCKET_UPDATE_INTERVAL = 51;
 
 // Auto-start
 unsigned long footPressStartTime = 0;
