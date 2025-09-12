@@ -664,13 +664,22 @@ void handleStartButton() {
 }
 
 void determineWinner() {
-  if ((leftFinished || rightFinished) && !falseStartOccurred) {
-    if (leftFinished && !rightFinished) {
+  bool leftDNF = !leftFinished && !leftFalseStart && completionTimeLeft == 0 && (currentElapsedTime > 0 || resetTimeoutActive);
+  bool rightDNF = !rightFinished && !rightFalseStart && completionTimeRight == 0 && (currentElapsedTime > 0 || resetTimeoutActive);
+  
+  if ((leftFinished || rightFinished || leftDNF || rightDNF) && !falseStartOccurred) {
+    if (leftFinished && !rightFinished && !rightDNF) {
       setLeftLEDs(CRGB::Green);
       setRightLEDs(CRGB::Red);
-    } else if (rightFinished && !leftFinished) {
+    } else if (rightFinished && !leftFinished && !leftDNF) {
       setRightLEDs(CRGB::Green);
       setLeftLEDs(CRGB::Red);
+    } else if (leftFinished && rightDNF) {
+      setLeftLEDs(CRGB::Green);
+      setRightLEDs(CRGB::Orange); // Keep orange for DNF
+    } else if (rightFinished && leftDNF) {
+      setRightLEDs(CRGB::Green);
+      setLeftLEDs(CRGB::Orange); // Keep orange for DNF
     } else if (leftFinished && rightFinished) {
       if (completionTimeLeft < completionTimeRight) {
         setLeftLEDs(CRGB::Green);
@@ -683,11 +692,22 @@ void determineWinner() {
         setRightLEDs(CRGB::Green);
       }
     }
+    // Both DNF case - no winner
+    else if (leftDNF && rightDNF) {
+      setLeftLEDs(CRGB::Orange);
+      setRightLEDs(CRGB::Orange);
+    }
   } else if (falseStartOccurred) {
     if (!leftFalseStart && rightFalseStart && leftFinished) {
       setLeftLEDs(CRGB::Green);
     } else if (!rightFalseStart && leftFalseStart && rightFinished) {
       setRightLEDs(CRGB::Green);
+    }
+    // Handle DNF with false start
+    else if (!leftFalseStart && rightFalseStart && leftDNF) {
+      setLeftLEDs(CRGB::Orange); // DNF but no false start
+    } else if (!rightFalseStart && leftFalseStart && rightDNF) {
+      setRightLEDs(CRGB::Orange); // DNF but no false start  
     }
   }
 }
@@ -821,6 +841,12 @@ void sendWebSocketUpdate() {
   doc["kids_mode_sensors_enabled"] = kidsModeSensorsEnabled;
   doc["competition_complete"] = (leftFinished || rightFinished) && !isAnyTimerRunning();
 
+  doc["left_finished"] = leftFinished;
+  doc["left_dnf"] = !leftFinished && !leftFalseStart && completionTimeLeft == 0 && (currentElapsedTime > 0 || resetTimeoutActive);
+  
+  doc["right_finished"] = rightFinished;
+  doc["right_dnf"] = !rightFinished && !rightFalseStart && completionTimeRight == 0 && (currentElapsedTime > 0 || resetTimeoutActive);
+
   doc["uptime"] = millis();
 
   String message;
@@ -915,6 +941,10 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
           singlePlayerMode = !singlePlayerMode;
         } else if (command == "toggle_kids_mode") {
           kidsModeSensorsEnabled = !kidsModeSensorsEnabled;
+        } else if (command == "dnf_left") {
+          handleDNF(true);  // true for left climber
+        } else if (command == "dnf_right") {
+          handleDNF(false); // false for right climber
         }
         sendWebSocketUpdate();
       }
@@ -922,6 +952,42 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
 
     default:
       break;
+  }
+}
+
+void handleDNF(bool isLeft) {
+  // Only allow DNF if timer is running and climber hasn't already finished
+  if (isAnyTimerRunning()) {
+    if (isLeft && !leftFinished && !leftFalseStart) {
+      // Stop left timer but don't set completion time
+      isTimerRunningLeft = false;
+      leftFinished = false;  // Keep as false to indicate DNF
+      completionTimeLeft = 0; // Ensure it stays 0 for DNF
+      
+      // Set LEDs to indicate DNF
+      setLeftLEDs(CRGB::Orange);
+      
+    } else if (!isLeft && !rightFinished && !rightFalseStart) {
+      // Stop right timer but don't set completion time  
+      isTimerRunningRight = false;
+      rightFinished = false;  // Keep as false to indicate DNF
+      completionTimeRight = 0; // Ensure it stays 0 for DNF
+      
+      // Set LEDs to indicate DNF
+      setRightLEDs(CRGB::Orange);
+    }
+    
+    // If both timers stopped, end the competition
+    if (!isAnyTimerRunning()) {
+      currentElapsedTime = millis() - timerStartTime;
+      resetTimeoutActive = true;
+      lastEventTime = millis();
+      
+      // Determine winner (the one who didn't DNF)
+      determineWinner();
+    }
+    
+    sendWebSocketUpdate();
   }
 }
 
@@ -1432,6 +1498,23 @@ void handleRoot() {
         max-width: 100px;
         min-height: 32px;
       }
+
+      .dnf-button {
+        background: linear-gradient(135deg, rgba(220,38,38,0.3), rgba(185,28,28,0.4));
+        border: 2px solid rgba(220,38,38,0.6);
+        color: #ff8a80;
+        font-weight: bold;
+        padding: 8px 16px;
+        margin: 8px 0;
+        border-radius: 8px;
+        font-size: 0.9em;
+        width: 100%;
+        max-width: 150px;
+      }
+      .dnf-button:hover {
+        background: linear-gradient(135deg, rgba(220,38,38,0.4), rgba(185,28,28,0.5));
+        transform: translateY(-1px);
+      }
     }
   </style>
 </head>
@@ -1448,6 +1531,7 @@ void handleRoot() {
         <div id='foot-status-left' class='foot-sensor foot-released'>Foot Sensor: None</div>
         <div id='reaction-time-left' class='reaction-time' style='display:none'>Reaction: 0:00.000</div>
         <div id='completion-time-left' class='completion-time' style='display:none'>Time: 0:00.000</div>
+        <button onclick='markDNF("left")' id='dnf-left-btn' class='dnf-button' style='display:none'>❌ Mark DNF</button>
       </div>
       
       <div class='climber-panel right-panel'>
@@ -1456,6 +1540,7 @@ void handleRoot() {
         <div id='foot-status-right' class='foot-sensor foot-released'>Foot Sensor: None</div>
         <div id='reaction-time-right' class='reaction-time' style='display:none'>Reaction: 0:00.000</div>
         <div id='completion-time-right' class='completion-time' style='display:none'>Time: 0:00.000</div>
+        <button onclick='markDNF("right")' id='dnf-right-btn' class='dnf-button' style='display:none'>❌ Mark DNF</button>
       </div>
       
       <div class='button-group'>
@@ -1513,6 +1598,12 @@ void handleRoot() {
       } else {
         instructionsDiv.style.display = 'none';
         helpBtn.textContent = '❓ Help';
+      }
+    }
+
+    function markDNF(side) {
+      if (confirm(`Mark ${side} climber as Did Not Finish?`)) {
+        ws.send(`dnf_${side}`);
       }
     }
 
@@ -1691,13 +1782,58 @@ void handleRoot() {
       ws.onopen = function() { console.log('WebSocket connected'); };
       ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
-        
+        const footLeftDiv = document.getElementById('foot-status-left');
+        const footRightDiv = document.getElementById('foot-status-right');
+
+        if(data.is_timer_running || data.competition_complete) {
+          footLeftDiv.style.display = 'none';
+          footRightDiv.style.display = 'none';
+        } else 
+        {
+          // Show foot sensor status when timer is not running
+          footLeftDiv.style.display = 'block';
+          
+          if(data.foot_left_pressed) {
+            footLeftDiv.textContent = 'Foot Sensor: Pressed';
+            footLeftDiv.className = 'foot-sensor foot-pressed';
+          } else {
+            footLeftDiv.textContent = 'Foot Sensor: None';
+            footLeftDiv.className = 'foot-sensor foot-released';
+          }
+          
+          footRightDiv.style.display = 'block';
+          
+          if(data.foot_right_pressed) {
+            footRightDiv.textContent = 'Foot Sensor: Pressed';
+            footRightDiv.className = 'foot-sensor foot-pressed';
+          } else {
+            footRightDiv.textContent = 'Foot Sensor: None';
+            footRightDiv.className = 'foot-sensor foot-released';
+          }
+        }
+
         // Check if competition just completed and auto-save
         if (data.competition_complete && !lastCompetitionComplete) {
           if (data.completion_time_left > 0 || data.completion_time_right > 0) {
             addLogEntry(data);
           }
         }
+
+        const dnfLeftBtn = document.getElementById('dnf-left-btn');
+        const dnfRightBtn = document.getElementById('dnf-right-btn');
+
+        if (data.is_timer_running && !data.left_finished && !data.left_false_start) {
+          dnfLeftBtn.style.display = 'block';
+        } else {
+          dnfLeftBtn.style.display = 'none';
+        }
+
+        if (data.is_timer_running && !data.right_finished && !data.right_false_start) {
+          dnfRightBtn.style.display = 'block';
+        } else {
+          dnfRightBtn.style.display = 'none';
+        }
+
         lastCompetitionComplete = data.competition_complete;
         
         const leftTimer = document.getElementById('timer-left');
@@ -1734,26 +1870,7 @@ void handleRoot() {
           rightTimer.textContent = '0:00.000';
           rightTimer.style.background = 'rgba(100,100,100,0.2)';
         }
-        
-        const footLeftDiv = document.getElementById('foot-status-left');
-        const footRightDiv = document.getElementById('foot-status-right');
-        
-        if(data.foot_left_pressed) {
-          footLeftDiv.textContent = 'Foot Sensor: Pressed';
-          footLeftDiv.className = 'foot-sensor foot-pressed';
-        } else {
-          footLeftDiv.textContent = 'Foot Sensor: None';
-          footLeftDiv.className = 'foot-sensor foot-released';
-        }
-        
-        if(data.foot_right_pressed) {
-          footRightDiv.textContent = 'Foot Sensor: Pressed';
-          footRightDiv.className = 'foot-sensor foot-pressed';
-        } else {
-          footRightDiv.textContent = 'Foot Sensor: None';
-          footRightDiv.className = 'foot-sensor foot-released';
-        }
-        
+                
         const modeBtn = document.getElementById('modeBtn');
         if(data.single_player_mode) {
           modeBtn.textContent = '👤 Single Player Mode';
