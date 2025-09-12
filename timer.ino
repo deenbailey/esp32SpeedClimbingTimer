@@ -36,6 +36,11 @@ const char* password = "airforce11";
 // const char* ssid = "Deen";
 // const char* password = "password";
 
+//loop check
+unsigned long loopCount = 0;
+unsigned long lastTime = 0;
+unsigned long lastLoopTime = 0;
+
 // Audio Config
 #define LEDC_CHANNEL 0
 #define LEDC_RESOLUTION 8
@@ -50,10 +55,7 @@ const AudioStep audioSequence[] = {
 };
 
 const AudioStep falseStartSequence[] = {
-  { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 },
-  { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 },
-  { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 },
-  { 1568, 100 }, { 0, 100 }
+  { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }, { 1568, 100 }, { 0, 100 }
 };
 
 const int AUDIO_SEQUENCE_LENGTH = sizeof(audioSequence) / sizeof(AudioStep);
@@ -85,6 +87,11 @@ bool footLeftPressed = false;
 bool footRightPressed = false;
 
 // False start tracking
+unsigned long startSignalTime = 0;
+long leftReactionTime = 0;
+long rightReactionTime = 0;
+bool leftReactionCalculated = false;
+bool rightReactionCalculated = false;
 bool falseStartOccurred = false;
 bool leftFalseStart = false;
 bool rightFalseStart = false;
@@ -93,6 +100,7 @@ bool rightFootValidDuringAudio = true;
 bool falseStartAudioPlayed = false;
 unsigned long leftFalseStartTime = 0;
 unsigned long rightFalseStartTime = 0;
+const unsigned long FALSE_START_REACTION_TIME_CUTOFF = 100;  //if reaction is under this time a false start is detected - 100ms
 
 // Mode and lane tracking
 bool singlePlayerMode = true;
@@ -187,6 +195,11 @@ void resetCompetitionState() {
   rightFinished = false;
   resetTimeoutActive = false;
   lastEventTime = 0;
+  startSignalTime = 0;
+  leftReactionTime = 0;
+  rightReactionTime = 0;
+  leftReactionCalculated = false;
+  rightReactionCalculated = false;
 }
 
 // LED Functions
@@ -240,7 +253,7 @@ void startAudioSequence() {
   audioSequenceStartTime = millis();
   setLeftLEDs(CRGB::Black);
   setRightLEDs(CRGB::Black);
-  
+
   if (audioSequence[0].frequency > 0) {
     playTone(audioSequence[0].frequency);
   } else {
@@ -252,7 +265,7 @@ void startFalseStartSequence() {
   isPlayingFalseStart = true;
   currentAudioStep = 0;
   audioStepStartTime = millis();
-  
+
   if (falseStartSequence[0].frequency > 0) {
     playTone(falseStartSequence[0].frequency);
   } else {
@@ -309,13 +322,13 @@ void updateAudioSequence() {
     }
 
     audioStepStartTime = currentTime;
-    
+
     // START TIMER WHEN 1760Hz TONE BEGINS (step 5 in the sequence)
     if (isPlayingAudio && currentAudioStep == 5 && sequence[currentAudioStep].frequency == 1760) {
       startTimer();
-      audioEndTime = millis(); // Set this for reaction time calculations
+      audioEndTime = millis();  // Set this for reaction time calculations
     }
-    
+
     if (sequence[currentAudioStep].frequency > 0) {
       playTone(sequence[currentAudioStep].frequency);
       handleAudioLEDs(sequence, sequence[currentAudioStep].frequency);
@@ -327,9 +340,9 @@ void updateAudioSequence() {
 }
 
 void calculateNegativeReactionTime(bool isLeft) {
-// Calculate when the 1760Hz tone should start based on the sequence timing
+  // Calculate when the 1760Hz tone should start based on the sequence timing
   unsigned long tone1760ShouldStart = audioSequenceStartTime + 500 + 250 + 750 + 250 + 750;
-  
+
   if (isLeft && leftFalseStart && leftFalseStartTime > 0) {
     reactionTimeLeft = (long)leftFalseStartTime - (long)tone1760ShouldStart;
   }
@@ -341,7 +354,7 @@ void calculateNegativeReactionTime(bool isLeft) {
 void completeAudioSequence() {
   isPlayingAudio = false;
   currentAudioStep = 0;
-  
+
   // Remove this line since timer already started:
   // audioEndTime = millis();
 
@@ -379,6 +392,7 @@ void startTimer() {
   }
 
   timerStartTime = millis();
+  startSignalTime = millis();  // Mark start signal time for reaction calculation
   sendWebSocketUpdate();
 }
 
@@ -429,69 +443,23 @@ void updateTimer() {
 }
 
 // False Start Detection
-void checkFalseStart(bool isLeft, bool footPressed, bool footValid) {
-  if (isPlayingAudio && !isPlayingFalseStart && currentAudioStep < 5) {
-    if (singlePlayerMode) {
-      if ((isLeft && footLeftPressed && !footPressed && leftFootValidDuringAudio) ||
-          (!isLeft && footRightPressed && !footPressed && rightFootValidDuringAudio)) {
-        
-        if (isLeft) {
-          leftFootValidDuringAudio = false;
-          leftFalseStart = true;
-          leftFalseStartTime = millis();
-          setLeftLEDs(CRGB::Red);
-        } else {
-          rightFootValidDuringAudio = false;
-          rightFalseStart = true;
-          rightFalseStartTime = millis();
-          setRightLEDs(CRGB::Red);
-        }
-        
-        falseStartOccurred = true;
-        resetTimeoutActive = true;
-        lastEventTime = millis();
-      }
-    } else {
-      if ((isLeft && !footPressed && leftFootValidDuringAudio) ||
-          (!isLeft && !footPressed && rightFootValidDuringAudio)) {
-        
-        if (isLeft) {
-          leftFootValidDuringAudio = false;
-          leftFalseStart = true;
-          leftFalseStartTime = millis();
-          setLeftLEDs(CRGB::Red);
-        } else {
-          rightFootValidDuringAudio = false;
-          rightFalseStart = true;
-          rightFalseStartTime = millis();
-          setRightLEDs(CRGB::Red);
-        }
-        
-        falseStartOccurred = true;
-      }
-    }
-  }
-}
-
 // Reaction Time Calculation
 void calculateReactionTime(bool isLeft) {
-  if ((currentAudioStep >= 5 || audioEndTime > 0) && 
-      ((isLeft && reactionTimeLeft == 0 && !leftFalseStart) ||
-       (!isLeft && reactionTimeRight == 0 && !rightFalseStart))) {
-    
+  if ((currentAudioStep >= 5 || audioEndTime > 0) && ((isLeft && reactionTimeLeft == 0 && !leftFalseStart) || (!isLeft && reactionTimeRight == 0 && !rightFalseStart))) {
+
     long reactionTime;
     if (audioEndTime > 0) {
       reactionTime = millis() - audioEndTime;
     } else {
       reactionTime = millis() - audioStepStartTime;
     }
-    
+
     if (isLeft) {
       reactionTimeLeft = reactionTime;
     } else {
       reactionTimeRight = reactionTime;
     }
-    
+
     sendWebSocketUpdate();
   }
 }
@@ -540,7 +508,72 @@ void handleFootSensorRelease(bool isLeft) {
     }
   }
 
-  calculateReactionTime(isLeft);
+  // Check for false start if audio is playing but timer hasn't started yet
+  if (isPlayingAudio && startSignalTime == 0) {
+    // Calculate negative reaction time for pre-start movement
+    unsigned long audioStartTime = audioSequenceStartTime;
+    unsigned long expectedStartTime = audioStartTime + 500 + 250 + 750 + 250 + 750;  // When 1760Hz should start
+    long negativeReactionTime = (long)millis() - (long)expectedStartTime;
+
+    if (isLeft) {
+      leftReactionTime = negativeReactionTime;  // Store negative reaction time
+      leftReactionCalculated = true;
+      leftFalseStart = true;
+      falseStartOccurred = true;
+      setLeftLEDs(CRGB::Red);
+    } else {
+      rightReactionTime = negativeReactionTime;  // Store negative reaction time
+      rightReactionCalculated = true;
+      rightFalseStart = true;
+      falseStartOccurred = true;
+      setRightLEDs(CRGB::Red);
+    }
+    resetTimeoutActive = true;
+    lastEventTime = millis();
+    sendWebSocketUpdate();
+    return;
+  }
+
+  // IFSC reaction time calculation (after start signal)
+  if (startSignalTime > 0 && isAnyTimerRunning()) {
+    unsigned long releaseTime = millis();
+    long reactionTime = (long)releaseTime - (long)startSignalTime;
+
+    if (isLeft && !leftReactionCalculated) {
+      leftReactionTime = reactionTime;
+      leftReactionCalculated = true;
+
+      if (reactionTime < FALSE_START_REACTION_TIME_CUTOFF) {  // False start < 100ms
+        leftFalseStart = true;
+        falseStartOccurred = true;
+        setLeftLEDs(CRGB::Red);
+      }
+    } else if (!isLeft && !rightReactionCalculated) {
+      rightReactionTime = reactionTime;
+      rightReactionCalculated = true;
+
+      if (reactionTime < FALSE_START_REACTION_TIME_CUTOFF) {  // False start < 100ms
+        rightFalseStart = true;
+        falseStartOccurred = true;
+        setRightLEDs(CRGB::Red);
+      }
+    }
+
+    // Handle both competitors false starting
+    if (leftFalseStart && rightFalseStart && leftReactionCalculated && rightReactionCalculated) {
+      if (leftReactionTime == rightReactionTime) {
+        // Equal reaction times - both false started
+      } else if (leftReactionTime < rightReactionTime) {
+        rightFalseStart = false;
+        setRightLEDs(CRGB::Black);
+      } else {
+        leftFalseStart = false;
+        setLeftLEDs(CRGB::Black);
+      }
+    }
+
+    sendWebSocketUpdate();
+  }
 }
 
 void checkAutoStart() {
@@ -563,9 +596,6 @@ void checkButtons() {
   bool stopRightNow = !digitalRead(STOP_SENSOR_RIGHT);
   bool footLeftNow = (digitalRead(FOOT_SENSOR_LEFT) == LOW);
   bool footRightNow = (digitalRead(FOOT_SENSOR_RIGHT) == LOW);
-
-  checkFalseStart(true, footLeftNow, leftFootValidDuringAudio);
-  checkFalseStart(false, footRightNow, rightFootValidDuringAudio);
 
   // Handle foot sensor changes
   if (footLeftNow && !footLeftPressed) {
@@ -695,14 +725,9 @@ void handleStopSensor(bool isLeft) {
 bool hasStateChanged() {
   bool footSensorChanged = (footLeftPressed != lastFootLeftPressed || footRightPressed != lastFootRightPressed);
   bool timerStateChanged = (isTimerRunningLeft != lastTimerRunningLeft || isTimerRunningRight != lastTimerRunningRight);
-  bool leftLaneStateChanged = (!singlePlayerMode || leftLaneActive) && 
-    (leftFalseStart != lastLeftFalseStart || leftFinished != lastLeftFinished || 
-     reactionTimeLeft != lastReactionTimeLeft || completionTimeLeft != lastCompletionTimeLeft);
-  bool rightLaneStateChanged = (!singlePlayerMode || rightLaneActive) && 
-    (rightFalseStart != lastRightFalseStart || rightFinished != lastRightFinished || 
-     reactionTimeRight != lastReactionTimeRight || completionTimeRight != lastCompletionTimeRight);
-  bool otherStateChanged = (isPlayingAudio != lastPlayingAudio || isPlayingFalseStart != lastPlayingFalseStart || 
-    falseStartOccurred != lastFalseStartOccurred || singlePlayerMode != lastSinglePlayerMode);
+  bool leftLaneStateChanged = (!singlePlayerMode || leftLaneActive) && (leftFalseStart != lastLeftFalseStart || leftFinished != lastLeftFinished || reactionTimeLeft != lastReactionTimeLeft || completionTimeLeft != lastCompletionTimeLeft);
+  bool rightLaneStateChanged = (!singlePlayerMode || rightLaneActive) && (rightFalseStart != lastRightFalseStart || rightFinished != lastRightFinished || reactionTimeRight != lastReactionTimeRight || completionTimeRight != lastCompletionTimeRight);
+  bool otherStateChanged = (isPlayingAudio != lastPlayingAudio || isPlayingFalseStart != lastPlayingFalseStart || falseStartOccurred != lastFalseStartOccurred || singlePlayerMode != lastSinglePlayerMode);
 
   return footSensorChanged || timerStateChanged || leftLaneStateChanged || rightLaneStateChanged || otherStateChanged;
 }
@@ -767,17 +792,18 @@ void sendWebSocketUpdate() {
   doc["elapsed_time"] = currentElapsedTime;
   doc["formatted_time"] = formatTime(currentElapsedTime);
 
-  doc["reaction_time_left"] = reactionTimeLeft;
-  doc["formatted_reaction_time_left"] = formatSignedTime(reactionTimeLeft);
   doc["completion_time_left"] = completionTimeLeft;
   doc["formatted_completion_time_left"] = formatTime(completionTimeLeft);
   doc["left_finished"] = leftFinished;
 
-  doc["reaction_time_right"] = reactionTimeRight;
-  doc["formatted_reaction_time_right"] = formatSignedTime(reactionTimeRight);
   doc["completion_time_right"] = completionTimeRight;
   doc["formatted_completion_time_right"] = formatTime(completionTimeRight);
   doc["right_finished"] = rightFinished;
+
+  doc["reaction_time_left"] = leftReactionCalculated ? leftReactionTime : 0;
+  doc["formatted_reaction_time_left"] = formatSignedTime(leftReactionCalculated ? leftReactionTime : 0);
+  doc["reaction_time_right"] = rightReactionCalculated ? rightReactionTime : 0;
+  doc["formatted_reaction_time_right"] = formatSignedTime(rightReactionCalculated ? rightReactionTime : 0);
 
   doc["uptime"] = millis();
 
@@ -1664,10 +1690,27 @@ void setup() {
 }
 
 void loop() {
+  // unsigned long loopStart = millis();
+  // loopCount++;
+
   server.handleClient();
   webSocket.loop();
   checkButtons();
   updateAudioSequence();
   updateTimer();
   updateWebSocket();
+
+  // lastLoopTime = millis() - loopStart;
+
+  // // Display stats every second
+  // if (millis() - lastTime >= 1000) {
+  //   Serial.print("Loops/sec: ");
+  //   Serial.print(loopCount);
+  //   Serial.print(" | Last loop took: ");
+  //   Serial.print(lastLoopTime);
+  //   Serial.println(" ms");
+
+  //   loopCount = 0;
+  //   lastTime = millis();
+  // }
 }
