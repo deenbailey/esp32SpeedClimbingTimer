@@ -20,6 +20,14 @@
 CRGB ledsLeft[NUM_LEDS_PER_STRIP];
 CRGB ledsRight[NUM_LEDS_PER_STRIP];
 
+// KID MODE STUFF
+#define STOP_SENSOR_LEFT_KIDS 27
+#define STOP_SENSOR_RIGHT_KIDS 32
+bool kidsModeSensorsEnabled = false;
+bool stopLeftKidsPressed = false;
+bool stopRightKidsPressed = false;
+bool lastKidsModeSensorsEnabled = false;
+
 // WiFi Config
 const char* ssid = "Nacho WiFi";
 const char* password = "airforce11";
@@ -413,6 +421,7 @@ void resetTimer() {
   lastReactionTimeRight = 0;
   lastCompletionTimeLeft = 0;
   lastCompletionTimeRight = 0;
+  lastKidsModeSensorsEnabled = kidsModeSensorsEnabled;
 
   turnOffAllLEDs();
   sendWebSocketUpdate();
@@ -599,6 +608,25 @@ void checkButtons() {
     stopRightPressed = false;
   }
 
+  // Handle kids mode stop sensors (only if enabled)
+  if (kidsModeSensorsEnabled) {
+    bool stopLeftKidsNow = !digitalRead(STOP_SENSOR_LEFT_KIDS);
+    bool stopRightKidsNow = !digitalRead(STOP_SENSOR_RIGHT_KIDS);
+
+    if (stopLeftKidsNow && !stopLeftKidsPressed) {
+      stopLeftKidsPressed = true;
+      handleStopSensor(true);  // Use same handler as regular stop sensor
+    } else if (!stopLeftKidsNow) {
+      stopLeftKidsPressed = false;
+    }
+
+    if (stopRightKidsNow && !stopRightKidsPressed) {
+      stopRightKidsPressed = true;
+      handleStopSensor(false);  // Use same handler as regular stop sensor
+    } else if (!stopRightKidsNow) {
+      stopRightKidsPressed = false;
+    }
+  }
   lastButtonCheck = millis();
 }
 
@@ -688,8 +716,9 @@ bool hasStateChanged() {
   bool leftLaneStateChanged = (!singlePlayerMode || leftLaneActive) && (leftFalseStart != lastLeftFalseStart || leftFinished != lastLeftFinished || reactionTimeLeft != lastReactionTimeLeft || completionTimeLeft != lastCompletionTimeLeft);
   bool rightLaneStateChanged = (!singlePlayerMode || rightLaneActive) && (rightFalseStart != lastRightFalseStart || rightFinished != lastRightFinished || reactionTimeRight != lastReactionTimeRight || completionTimeRight != lastCompletionTimeRight);
   bool otherStateChanged = (isPlayingAudio != lastPlayingAudio || isPlayingFalseStart != lastPlayingFalseStart || falseStartOccurred != lastFalseStartOccurred || singlePlayerMode != lastSinglePlayerMode);
+  bool kidsModeSensorsChanged = (kidsModeSensorsEnabled != lastKidsModeSensorsEnabled);
 
-  return footSensorChanged || timerStateChanged || leftLaneStateChanged || rightLaneStateChanged || otherStateChanged;
+  return footSensorChanged || timerStateChanged || leftLaneStateChanged || rightLaneStateChanged || otherStateChanged || kidsModeSensorsChanged;
 }
 
 void updateLastState() {
@@ -709,6 +738,7 @@ void updateLastState() {
   lastReactionTimeRight = reactionTimeRight;
   lastCompletionTimeLeft = completionTimeLeft;
   lastCompletionTimeRight = completionTimeRight;
+  lastKidsModeSensorsEnabled = kidsModeSensorsEnabled;
 }
 
 void updateWebSocket() {
@@ -764,6 +794,7 @@ void sendWebSocketUpdate() {
   doc["formatted_reaction_time_left"] = formatSignedTime(leftReactionCalculated ? leftReactionTime : 0);
   doc["reaction_time_right"] = rightReactionCalculated ? rightReactionTime : 0;
   doc["formatted_reaction_time_right"] = formatSignedTime(rightReactionCalculated ? rightReactionTime : 0);
+  doc["kids_mode_sensors_enabled"] = kidsModeSensorsEnabled;
 
   doc["uptime"] = millis();
 
@@ -848,6 +879,8 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
           }
         } else if (command == "toggle_mode") {
           singlePlayerMode = !singlePlayerMode;
+        } else if (command == "toggle_kids_mode") {
+          kidsModeSensorsEnabled = !kidsModeSensorsEnabled;
         }
         sendWebSocketUpdate();
       }
@@ -1050,10 +1083,11 @@ void handleRoot() {
     .button-group { 
       text-align: center; 
       margin: 20px 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-column: 1 / -1;
       gap: 10px;
+      justify-items: center;
     }
     
     .mode-toggle {
@@ -1215,6 +1249,34 @@ void handleRoot() {
         padding: 15px;
       }
     }
+    .kids-mode-toggle {
+        background: rgba(255,255,255,0.15);
+        border: 2px solid rgba(255,255,255,0.4);
+        padding: 12px 24px;
+        border-radius: 30px;
+        font-size: 14px;
+        font-weight: bold;
+        position: relative;
+        overflow: hidden;
+        transition: all 0.4s ease;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+        width: 100%;
+        max-width: 240px;
+      }
+      .kids-mode-toggle.enabled {
+        background: linear-gradient(135deg, #FF6B35, #FF8E53);
+        border-color: #FF5722;
+        box-shadow: 0 6px 20px rgba(255, 107, 53, 0.5);
+      }
+      .kids-mode-toggle.disabled {
+        background: linear-gradient(135deg, #666, #888);
+        border-color: #555;
+        box-shadow: 0 6px 20px rgba(102, 102, 102, 0.3);
+      }
+      .kids-mode-toggle:hover {
+        transform: translateY(-2px) scale(1.02);
+        box-shadow: 0 8px 25px rgba(255,255,255,0.3);
+      }
   </style>
 </head>
 <body>
@@ -1244,6 +1306,7 @@ void handleRoot() {
         <button onclick='startSequence()' id='startBtn'>🚀 Start Competition</button>
         <button onclick='resetTimer()' id='resetBtn'>🔄 Reset</button>
         <button onclick='toggleMode()' id='modeBtn' class='mode-toggle competition-mode'>🏆 Competition Mode</button>
+        <button onclick='toggleKidsMode()' id='kidsModeBtn' class='kids-mode-toggle disabled'>👶 Kids Sensors: OFF</button>
       </div>
       
       <div class='instructions'>
@@ -1261,6 +1324,7 @@ void handleRoot() {
 
   <script>
     let ws;
+    function toggleKidsMode() { ws.send('toggle_kids_mode'); }
     function connectWebSocket() {
       const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(protocol + '://' + location.hostname + ':81');
@@ -1329,6 +1393,15 @@ void handleRoot() {
         } else {
           modeBtn.textContent = '🏆 Competition Mode';
           modeBtn.className = 'mode-toggle competition-mode';
+        }
+
+        const kidsModeBtn = document.getElementById('kidsModeBtn');
+        if(data.kids_mode_sensors_enabled) {
+          kidsModeBtn.textContent = '👶 Kids Sensors: ON';
+          kidsModeBtn.className = 'kids-mode-toggle enabled';
+        } else {
+          kidsModeBtn.textContent = '👶 Kids Sensors: OFF';
+          kidsModeBtn.className = 'kids-mode-toggle disabled';
         }
         
         const instructionsTitle = document.getElementById('instructions-title');
@@ -1606,6 +1679,12 @@ void handleApiReset() {
   server.send(200, "application/json", "{\"status\":\"reset\"}");
 }
 
+void handleApiToggleKidsMode() {
+  kidsModeSensorsEnabled = !kidsModeSensorsEnabled;
+  server.send(200, "application/json", "{\"status\":\"kids_mode_toggled\",\"enabled\":" + String(kidsModeSensorsEnabled ? "true" : "false") + "}");
+  sendWebSocketUpdate();
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -1614,6 +1693,8 @@ void setup() {
   pinMode(STOP_SENSOR_RIGHT, INPUT_PULLUP);
   pinMode(FOOT_SENSOR_LEFT, INPUT_PULLUP);
   pinMode(FOOT_SENSOR_RIGHT, INPUT_PULLUP);
+  pinMode(STOP_SENSOR_LEFT_KIDS, INPUT_PULLUP);
+  pinMode(STOP_SENSOR_RIGHT_KIDS, INPUT_PULLUP);
 
   initializeLEDs();
 
@@ -1640,6 +1721,7 @@ void setup() {
   server.on("/api/start", HTTP_POST, handleApiStart);
   server.on("/api/stop", HTTP_POST, handleApiStop);
   server.on("/api/reset", HTTP_POST, handleApiReset);
+  server.on("/api/toggle_kids_mode", HTTP_POST, handleApiToggleKidsMode);
 
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
