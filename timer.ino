@@ -727,19 +727,20 @@ void updateLastState() {
 }
 
 void updateWebSocket() {
+  unsigned long currentTime = millis();
   bool shouldUpdate = false;
 
   if (singlePlayerMode) {
-    shouldUpdate = (leftLaneActive && isTimerRunningLeft) || (rightLaneActive && isTimerRunningRight) || 
-                   isPlayingAudio || isPlayingFalseStart || hasStateChanged();
+    shouldUpdate = (leftLaneActive && isTimerRunningLeft) || (rightLaneActive && isTimerRunningRight) || isPlayingAudio || isPlayingFalseStart || hasStateChanged();
   } else {
     shouldUpdate = isAnyTimerRunning() || isPlayingAudio || isPlayingFalseStart || hasStateChanged();
   }
 
-  if (shouldUpdate) {
+  // Only send update if shouldUpdate is true AND at least WEBSOCKET_UPDATE_INTERVAL ms have passed
+  if (shouldUpdate && (currentTime - lastWebSocketUpdate >= WEBSOCKET_UPDATE_INTERVAL)) {
     sendWebSocketUpdate();
     updateLastState();
-    lastWebSocketUpdate = millis();
+    lastWebSocketUpdate = currentTime;
   }
 }
 
