@@ -2152,9 +2152,8 @@ void loop() {
       Serial.print(" | Last loop took: ");
       Serial.print(lastLoopTime);
       Serial.println(" ms");
-
-      loopCount = 0;
-      lastTime = millis();
     }
+    loopCount = 0;
+    lastTime = millis();
   }
 }
