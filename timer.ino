@@ -30,8 +30,8 @@ bool stopRightKidsPressed = false;
 bool lastKidsModeSensorsEnabled = false;
 
 // WiFi Config
-const char* ap_ssid = "GravityWorx-Timer";
-const char* ap_password = "climbing123";  // Min 8 chars, or "" for open network
+const char* ap_ssid = "Gravity Worx Speed Timer";
+const char* ap_password = "";  // Min 8 chars, or "" for open network
 DNSServer dnsServer;
 const byte DNS_PORT = 53;
 
