@@ -1289,19 +1289,24 @@ void handleRoot() {
       border: 1px solid rgba(255,255,255,0.2);
       font-size: 0.9em;
     }
-    
+
+    /* Only apply winner styling for competition mode or multi-person single player */
     .log-entry.winner-left {
-      border-left: 4px solid #4CAF50;
+      border-left: 4px solid #FFD700;
+      background: linear-gradient(135deg, rgba(255,215,0,0.15), rgba(255,215,0,0.08));
+      box-shadow: 0 0 10px rgba(255,215,0,0.3);
     }
-    
+
     .log-entry.winner-right {
-      border-left: 4px solid #2196F3;
+      border-left: 4px solid #FFD700;
+      background: linear-gradient(135deg, rgba(255,215,0,0.15), rgba(255,215,0,0.08));
+      box-shadow: 0 0 10px rgba(255,215,0,0.3);
     }
-    
+
     .log-entry.single-player {
       border-left: 4px solid #FF9800;
     }
-    
+
     .log-entry-header {
       font-weight: bold;
       margin-bottom: 5px;
@@ -1309,24 +1314,47 @@ void handleRoot() {
       justify-content: space-between;
       align-items: center;
     }
-    
+
+    .winner-badge {
+      color: #FFD700;
+      font-weight: bold;
+      text-shadow: 0 0 5px rgba(255,215,0,0.5);
+    }
+
+    /* Flexible grid layout for log times */
     .log-times {
+      margin-top: 8px;
+    }
+
+    .log-times.two-column {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
-      margin-top: 8px;
     }
-    
+
+    .log-times.single-column {
+      display: flex;
+      justify-content: center;
+    }
+
+    .log-times.single-column .log-time {
+      max-width: 300px;
+      width: 100%;
+    }
+
     .log-time {
       background: rgba(0,0,0,0.2);
-      padding: 6px;
-      border-radius: 4px;
+      padding: 8px;
+      border-radius: 6px;
       text-align: center;
+      border: 1px solid rgba(255,255,255,0.1);
     }
-    
+
+    /* Only apply false-start styling in competition mode */
     .log-time.false-start {
       background: rgba(220,38,38,0.3);
       color: #ff8a80;
+      border: 1px solid rgba(220,38,38,0.5);
     }
     
     .empty-log {
@@ -1461,6 +1489,24 @@ void handleRoot() {
       }
     }
     
+    /* Mobile responsive adjustments */
+    @media (max-width: 768px) {
+      .log-times.two-column {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      
+      .log-entry-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+      }
+      
+      .winner-badge {
+        align-self: flex-end;
+      }
+    }
+
     @media (max-width: 360px) {
       body {
         padding: 5px;
@@ -1658,24 +1704,44 @@ void handleRoot() {
       timesLog.forEach((entry, index) => {
         let entryClass = 'log-entry';
         let winner = '';
+        let showWinner = false;
         
         if (entry.singlePlayerMode) {
           entryClass += ' single-player';
-          if (entry.leftFinished && !entry.leftFalseStart) {
+          // For single player, only show winner styling if both lanes have valid times (indicating a race between two single players)
+          const leftHasTime = entry.leftFinished && !entry.leftFalseStart && entry.leftTime > 0;
+          const rightHasTime = entry.rightFinished && !entry.rightFalseStart && entry.rightTime > 0;
+          
+          if (leftHasTime && rightHasTime) {
+            showWinner = true;
+            if (entry.leftTime < entry.rightTime) {
+              entryClass += ' winner-left';
+              winner = 'Left Climber';
+            } else if (entry.rightTime < entry.leftTime) {
+              entryClass += ' winner-right';
+              winner = 'Right Climber';
+            } else {
+              winner = 'Tie';
+            }
+          } else if (leftHasTime) {
             winner = 'Left Climber';
-          } else if (entry.rightFinished && !entry.rightFalseStart) {
+          } else if (rightHasTime) {
             winner = 'Right Climber';
           }
         } else {
-          // Determine winner in competition mode
-          if (entry.leftFalseStart && !entry.rightFalseStart && entry.rightFinished) {
-            entryClass += ' winner-right';
-            winner = 'Right Climber (Left DQ)';
-          } else if (entry.rightFalseStart && !entry.leftFalseStart && entry.leftFinished) {
-            entryClass += ' winner-left';
-            winner = 'Left Climber (Right DQ)';
-          } else if (!entry.leftFalseStart && !entry.rightFalseStart) {
-            if (entry.leftFinished && entry.rightFinished) {
+          // Competition mode - keep existing logic but only show winner for valid completions
+          const leftValid = entry.leftFinished && !entry.leftFalseStart;
+          const rightValid = entry.rightFinished && !entry.rightFalseStart;
+          
+          if (leftValid || rightValid) {
+            showWinner = true;
+            if (entry.leftFalseStart && !entry.rightFalseStart && entry.rightFinished) {
+              entryClass += ' winner-right';
+              winner = 'Right Climber';
+            } else if (entry.rightFalseStart && !entry.leftFalseStart && entry.leftFinished) {
+              entryClass += ' winner-left';
+              winner = 'Left Climber';
+            } else if (leftValid && rightValid) {
               if (entry.leftTime < entry.rightTime) {
                 entryClass += ' winner-left';
                 winner = 'Left Climber';
@@ -1685,33 +1751,120 @@ void handleRoot() {
               } else {
                 winner = 'Tie';
               }
-            } else if (entry.leftFinished) {
+            } else if (leftValid) {
               entryClass += ' winner-left';
               winner = 'Left Climber';
-            } else if (entry.rightFinished) {
+            } else if (rightValid) {
               entryClass += ' winner-right';
               winner = 'Right Climber';
             }
           }
         }
 
+        // Determine which times to show based on mode and actual data
+        let leftTimeDisplay = '';
+        let rightTimeDisplay = '';
+        let showLeftTime = false;
+        let showRightTime = false;
+
+        if (entry.singlePlayerMode) {
+          // In single player, only show times that actually have data
+          if (entry.leftFinished || entry.leftFalseStart || entry.leftTime > 0) {
+            showLeftTime = true;
+            if (entry.leftFinished && entry.leftTime > 0) {
+              leftTimeDisplay = `
+                <div class="log-time">
+                  <strong>Left:</strong><br>
+                  Time: ${entry.formattedLeftTime}<br>
+                  Reaction: ${entry.formattedLeftReaction}
+                </div>
+              `;
+            } else if (entry.leftFalseStart) {
+              leftTimeDisplay = `
+                <div class="log-time">
+                  <strong>Left:</strong><br>
+                  Time: DQ (False Start)<br>
+                  Reaction: ${entry.formattedLeftReaction}
+                </div>
+              `;
+            } else {
+              leftTimeDisplay = `
+                <div class="log-time">
+                  <strong>Left:</strong><br>
+                  Time: DNF<br>
+                  Reaction: ${entry.formattedLeftReaction}
+                </div>
+              `;
+            }
+          }
+
+          if (entry.rightFinished || entry.rightFalseStart || entry.rightTime > 0) {
+            showRightTime = true;
+            if (entry.rightFinished && entry.rightTime > 0) {
+              rightTimeDisplay = `
+                <div class="log-time">
+                  <strong>Right:</strong><br>
+                  Time: ${entry.formattedRightTime}<br>
+                  Reaction: ${entry.formattedRightReaction}
+                </div>
+              `;
+            } else if (entry.rightFalseStart) {
+              rightTimeDisplay = `
+                <div class="log-time">
+                  <strong>Right:</strong><br>
+                  Time: DQ (False Start)<br>
+                  Reaction: ${entry.formattedRightReaction}
+                </div>
+              `;
+            } else {
+              rightTimeDisplay = `
+                <div class="log-time">
+                  <strong>Right:</strong><br>
+                  Time: DNF<br>
+                  Reaction: ${entry.formattedRightReaction}
+                </div>
+              `;
+            }
+          }
+        } else {
+          // Competition mode - show both times
+          showLeftTime = true;
+          showRightTime = true;
+          
+          leftTimeDisplay = `
+            <div class="log-time ${entry.leftFalseStart ? 'false-start' : ''}">
+              <strong>Left:</strong><br>
+              Time: ${entry.leftFinished ? entry.formattedLeftTime : 'DNF'}${entry.leftFalseStart ? ' (DQ)' : ''}<br>
+              Reaction: ${entry.formattedLeftReaction}
+            </div>
+          `;
+          
+          rightTimeDisplay = `
+            <div class="log-time ${entry.rightFalseStart ? 'false-start' : ''}">
+              <strong>Right:</strong><br>
+              Time: ${entry.rightFinished ? entry.formattedRightTime : 'DNF'}${entry.rightFalseStart ? ' (DQ)' : ''}<br>
+              Reaction: ${entry.formattedRightReaction}
+            </div>
+          `;
+        }
+
+        // Determine grid layout based on what's being shown
+        let gridClass = 'log-times';
+        if (showLeftTime && showRightTime) {
+          gridClass = 'log-times two-column';
+        } else {
+          gridClass = 'log-times single-column';
+        }
+
         html += `
           <div class="${entryClass}">
             <div class="log-entry-header">
               <span>${entry.date} ${entry.time} - ${entry.singlePlayerMode ? 'Single Player' : 'Competition'}</span>
-              ${winner ? `<span>🏆 ${winner}</span>` : ''}
+              ${showWinner && winner ? `<span class="winner-badge">${winner}</span>` : ''}
             </div>
-            <div class="log-times">
-              <div class="log-time ${entry.leftFalseStart ? 'false-start' : ''}">
-                <strong>Left:</strong><br>
-                Time: ${entry.leftFinished ? entry.formattedLeftTime : 'DNF'}${entry.leftFalseStart ? ' (DQ)' : ''}<br>
-                Reaction: ${entry.formattedLeftReaction}
-              </div>
-              <div class="log-time ${entry.rightFalseStart ? 'false-start' : ''}">
-                <strong>Right:</strong><br>
-                Time: ${entry.rightFinished ? entry.formattedRightTime : 'DNF'}${entry.rightFalseStart ? ' (DQ)' : ''}<br>
-                Reaction: ${entry.formattedRightReaction}
-              </div>
+            <div class="${gridClass}">
+              ${showLeftTime ? leftTimeDisplay : ''}
+              ${showRightTime ? rightTimeDisplay : ''}
             </div>
           </div>
         `;
@@ -1719,7 +1872,6 @@ void handleRoot() {
       
       logContainer.innerHTML = html;
     }
-
     // Clear log
     function clearLog() {
       if (confirm('Are you sure you want to clear all logged times? This cannot be undone.')) {
