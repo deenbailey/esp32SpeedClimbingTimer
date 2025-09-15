@@ -35,21 +35,6 @@ const char* ap_password = "climbing123";  // Min 8 chars, or "" for open network
 DNSServer dnsServer;
 const byte DNS_PORT = 53;
 
-// const char* ssid = "Nacho WiFi";
-// const char* password = "airforce11";
-
-// Gravitry Worx Wifi
-// const char* ssid = "Optus_53BE2F";
-// const char* password = "kudzuzerdauRX5r";
-
-// Work Phone Wifi
-// const char* ssid = "IPY6J60VPXF0";
-// const char* password = "password133";
-
-// Dean Phone Wifi
-// const char* ssid = "Deen";
-// const char* password = "password";
-
 //loop check
 unsigned long loopCount = 0;
 unsigned long lastTime = 0;
@@ -2329,21 +2314,6 @@ void setup() {
   ledcWrite(AUDIO_PIN, 0);
 
   /////////////WIFI/////////////
-
-  // WiFi.begin(ssid, password);
-  // Serial.print("Connecting to WiFi");
-  // while (WiFi.status() != WL_CONNECTED && (millis() - startTime) < timeout) {
-  //   delay(500);
-  //   Serial.print(".");
-  // }
-
-  // if (WiFi.status() != WL_CONNECTED) {
-  //   Serial.println("\nWiFi connection timeout!");
-  // } else {
-  //   Serial.println("\nWiFi connected!");
-  //   Serial.print("IP address: ");
-  //   Serial.println(WiFi.localIP());
-  // }
 
   Serial.println("Setting up Access Point...");
 
