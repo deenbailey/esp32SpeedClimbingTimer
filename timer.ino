@@ -799,11 +799,7 @@ void updateWebSocket() {
   }
 }
 
-void sendWebSocketUpdate() {
-  if (!hasConnectedClients()) {
-    return;
-  }
-
+DynamicJsonDocument buildStatusJson() {
   if (isAnyTimerRunning()) {
     currentElapsedTime = millis() - timerStartTime;
   }
@@ -811,6 +807,8 @@ void sendWebSocketUpdate() {
   DynamicJsonDocument doc(1024);
 
   doc["is_timer_running"] = isAnyTimerRunning();
+  doc["is_timer_running_left"] = isTimerRunningLeft;  // Added for DNF button logic
+  doc["is_timer_running_right"] = isTimerRunningRight; // Added for DNF button logic
   doc["is_playing_audio"] = isPlayingAudio;
   doc["is_playing_false_start"] = isPlayingFalseStart;
   doc["false_start_occurred"] = falseStartOccurred;
@@ -841,17 +839,12 @@ void sendWebSocketUpdate() {
   doc["kids_mode_sensors_enabled"] = kidsModeSensorsEnabled;
   doc["competition_complete"] = (leftFinished || rightFinished) && !isAnyTimerRunning();
 
-  doc["left_finished"] = leftFinished;
   doc["left_dnf"] = !leftFinished && !leftFalseStart && completionTimeLeft == 0 && (currentElapsedTime > 0 || resetTimeoutActive);
-  
-  doc["right_finished"] = rightFinished;
   doc["right_dnf"] = !rightFinished && !rightFalseStart && completionTimeRight == 0 && (currentElapsedTime > 0 || resetTimeoutActive);
 
   doc["uptime"] = millis();
 
-  String message;
-  serializeJson(doc, message);
-  webSocket.broadcastTXT(message);
+  return doc;
 }
 
 bool hasConnectedClients() {
@@ -1371,6 +1364,23 @@ void handleRoot() {
         transform: translateY(-2px) scale(1.02);
         box-shadow: 0 8px 25px rgba(255,255,255,0.3);
       }
+
+      .dnf-button {
+        background: linear-gradient(135deg, rgba(220,38,38,0.3), rgba(185,28,28,0.4));
+        border: 2px solid rgba(220,38,38,0.6);
+        color: #ff8a80;
+        font-weight: bold;
+        padding: 8px 16px;
+        margin: 8px auto;  /* This auto margin works with display: block */
+        border-radius: 8px;
+        font-size: 0.9em;
+        width: 150px;      /* Fixed width instead of max-width */
+        display: block;    /* Add this to make the button a block element */
+      }
+      .dnf-button:hover {
+        background: linear-gradient(135deg, rgba(220,38,38,0.4), rgba(185,28,28,0.5));
+        transform: translateY(-1px);
+      }
     
     @media (min-width: 768px) {
       body {
@@ -1497,23 +1507,6 @@ void handleRoot() {
         padding: 6px 12px;
         max-width: 100px;
         min-height: 32px;
-      }
-
-      .dnf-button {
-        background: linear-gradient(135deg, rgba(220,38,38,0.3), rgba(185,28,28,0.4));
-        border: 2px solid rgba(220,38,38,0.6);
-        color: #ff8a80;
-        font-weight: bold;
-        padding: 8px 16px;
-        margin: 8px auto;
-        border-radius: 8px;
-        font-size: 0.9em;
-        width: 100%;
-        max-width: 150px;
-      }
-      .dnf-button:hover {
-        background: linear-gradient(135deg, rgba(220,38,38,0.4), rgba(185,28,28,0.5));
-        transform: translateY(-1px);
       }
     }
   </style>
@@ -1822,13 +1815,13 @@ void handleRoot() {
         const dnfLeftBtn = document.getElementById('dnf-left-btn');
         const dnfRightBtn = document.getElementById('dnf-right-btn');
 
-        if (data.is_timer_running && !data.left_finished && !data.left_false_start) {
+        if (data.is_timer_running && data.is_timer_running_left && !data.left_finished && !data.left_false_start) {
           dnfLeftBtn.style.display = 'block';
         } else {
           dnfLeftBtn.style.display = 'none';
         }
 
-        if (data.is_timer_running && !data.right_finished && !data.right_false_start) {
+        if (data.is_timer_running && data.is_timer_running_right && !data.right_finished && !data.right_false_start) {
           dnfRightBtn.style.display = 'block';
         } else {
           dnfRightBtn.style.display = 'none';
@@ -2091,41 +2084,21 @@ void handleRoot() {
 }
 
 void handleApiStatus() {
-  DynamicJsonDocument doc(1024);
-
-  doc["is_timer_running"] = isAnyTimerRunning();
-  doc["is_playing_audio"] = isPlayingAudio;
-  doc["is_playing_false_start"] = isPlayingFalseStart;
-  doc["false_start_occurred"] = falseStartOccurred;
-  doc["left_false_start"] = leftFalseStart;
-  doc["right_false_start"] = rightFalseStart;
-  doc["single_player_mode"] = singlePlayerMode;
-
-  doc["foot_left_pressed"] = footLeftPressed;
-  doc["foot_right_pressed"] = footRightPressed;
-  doc["both_feet_ready"] = footLeftPressed && footRightPressed;
-  doc["ready_to_start"] = singlePlayerMode ? (footLeftPressed || footRightPressed) : (footLeftPressed && footRightPressed);
-
-  doc["elapsed_time"] = currentElapsedTime;
-  doc["formatted_time"] = formatTime(currentElapsedTime);
-
-  doc["reaction_time_left"] = reactionTimeLeft;
-  doc["formatted_reaction_time_left"] = formatSignedTime(reactionTimeLeft);
-  doc["completion_time_left"] = completionTimeLeft;
-  doc["formatted_completion_time_left"] = formatTime(completionTimeLeft);
-  doc["left_finished"] = leftFinished;
-
-  doc["reaction_time_right"] = reactionTimeRight;
-  doc["formatted_reaction_time_right"] = formatSignedTime(reactionTimeRight);
-  doc["completion_time_right"] = completionTimeRight;
-  doc["formatted_completion_time_right"] = formatTime(completionTimeRight);
-  doc["right_finished"] = rightFinished;
-
-  doc["uptime"] = millis();
-
+  DynamicJsonDocument doc = buildStatusJson();
   String response;
   serializeJson(doc, response);
   server.send(200, "application/json", response);
+}
+
+void sendWebSocketUpdate() {
+  if (!hasConnectedClients()) {
+    return;
+  }
+
+  DynamicJsonDocument doc = buildStatusJson();
+  String message;
+  serializeJson(doc, message);
+  webSocket.broadcastTXT(message);
 }
 
 void handleApiStart() {
