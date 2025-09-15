@@ -1071,7 +1071,6 @@ void handleRoot() {
     .false-start { 
       background: linear-gradient(135deg, rgba(220,38,38,0.8), rgba(185,28,28,0.9));
       border: 2px solid #dc2626;
-      animation: pulse-red 0.5s ease-in-out infinite alternate;
     }
     
     @keyframes pulse-green {
@@ -1132,6 +1131,12 @@ void handleRoot() {
     .completion-time { 
       background: linear-gradient(135deg, rgba(34,197,94,0.3), rgba(22,163,74,0.4)); 
       box-shadow: 0 3px 12px rgba(34,197,94,0.2);
+    }
+
+    .winner-time {
+      background: rgba(255,215,0,0.3) !important; 
+      border: 2px solid gold;
+      animation: winner-glow 1s ease-in-out infinite alternate;
     }
     
     .winner { 
@@ -1705,6 +1710,8 @@ void handleRoot() {
         let entryClass = 'log-entry';
         let winner = '';
         let showWinner = false;
+        let leftIsWinner = false;
+        let rightIsWinner = false;
         
         if (entry.singlePlayerMode) {
           entryClass += ' single-player';
@@ -1715,18 +1722,22 @@ void handleRoot() {
           if (leftHasTime && rightHasTime) {
             showWinner = true;
             if (entry.leftTime < entry.rightTime) {
-              entryClass += ' winner-left';
               winner = 'Left Climber';
+              leftIsWinner = true;
             } else if (entry.rightTime < entry.leftTime) {
-              entryClass += ' winner-right';
               winner = 'Right Climber';
+              rightIsWinner = true;
             } else {
               winner = 'Tie';
+              leftIsWinner = true;
+              rightIsWinner = true;
             }
           } else if (leftHasTime) {
             winner = 'Left Climber';
+            leftIsWinner = true;
           } else if (rightHasTime) {
             winner = 'Right Climber';
+            rightIsWinner = true;
           }
         } else {
           // Competition mode - keep existing logic but only show winner for valid completions
@@ -1736,27 +1747,29 @@ void handleRoot() {
           if (leftValid || rightValid) {
             showWinner = true;
             if (entry.leftFalseStart && !entry.rightFalseStart && entry.rightFinished) {
-              entryClass += ' winner-right';
               winner = 'Right Climber';
+              rightIsWinner = true;
             } else if (entry.rightFalseStart && !entry.leftFalseStart && entry.leftFinished) {
-              entryClass += ' winner-left';
               winner = 'Left Climber';
+              leftIsWinner = true;
             } else if (leftValid && rightValid) {
               if (entry.leftTime < entry.rightTime) {
-                entryClass += ' winner-left';
                 winner = 'Left Climber';
+                leftIsWinner = true;
               } else if (entry.rightTime < entry.leftTime) {
-                entryClass += ' winner-right';
                 winner = 'Right Climber';
+                rightIsWinner = true;
               } else {
                 winner = 'Tie';
+                leftIsWinner = true;
+                rightIsWinner = true;
               }
             } else if (leftValid) {
-              entryClass += ' winner-left';
               winner = 'Left Climber';
+              leftIsWinner = true;
             } else if (rightValid) {
-              entryClass += ' winner-right';
               winner = 'Right Climber';
+              rightIsWinner = true;
             }
           }
         }
@@ -1773,7 +1786,7 @@ void handleRoot() {
             showLeftTime = true;
             if (entry.leftFinished && entry.leftTime > 0) {
               leftTimeDisplay = `
-                <div class="log-time">
+                <div class="log-time ${leftIsWinner ? 'winner-time' : ''}">
                   <strong>Left:</strong><br>
                   Time: ${entry.formattedLeftTime}<br>
                   Reaction: ${entry.formattedLeftReaction}
@@ -1802,7 +1815,7 @@ void handleRoot() {
             showRightTime = true;
             if (entry.rightFinished && entry.rightTime > 0) {
               rightTimeDisplay = `
-                <div class="log-time">
+                <div class="log-time ${rightIsWinner ? 'winner-time' : ''}">
                   <strong>Right:</strong><br>
                   Time: ${entry.formattedRightTime}<br>
                   Reaction: ${entry.formattedRightReaction}
@@ -1832,7 +1845,7 @@ void handleRoot() {
           showRightTime = true;
           
           leftTimeDisplay = `
-            <div class="log-time ${entry.leftFalseStart ? 'false-start' : ''}">
+            <div class="log-time ${entry.leftFalseStart ? 'false-start' : ''} ${leftIsWinner ? 'winner-time' : ''}">
               <strong>Left:</strong><br>
               Time: ${entry.leftFinished ? entry.formattedLeftTime : 'DNF'}${entry.leftFalseStart ? ' (DQ)' : ''}<br>
               Reaction: ${entry.formattedLeftReaction}
@@ -1840,7 +1853,7 @@ void handleRoot() {
           `;
           
           rightTimeDisplay = `
-            <div class="log-time ${entry.rightFalseStart ? 'false-start' : ''}">
+            <div class="log-time ${entry.rightFalseStart ? 'false-start' : ''} ${rightIsWinner ? 'winner-time' : ''}">
               <strong>Right:</strong><br>
               Time: ${entry.rightFinished ? entry.formattedRightTime : 'DNF'}${entry.rightFalseStart ? ' (DQ)' : ''}<br>
               Reaction: ${entry.formattedRightReaction}
@@ -1872,6 +1885,7 @@ void handleRoot() {
       
       logContainer.innerHTML = html;
     }
+
     // Clear log
     function clearLog() {
       if (confirm('Are you sure you want to clear all logged times? This cannot be undone.')) {
