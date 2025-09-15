@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <WebSocketsServer.h>
 #include <FastLED.h>
+#include <DNSServer.h>
 
 // Hardware Config
 #define START_BUTTON 19
@@ -29,20 +30,10 @@ bool stopRightKidsPressed = false;
 bool lastKidsModeSensorsEnabled = false;
 
 // WiFi Config
-const char* ssid = "Nacho WiFi";
-const char* password = "airforce11";
-
-// Gravitry Worx Wifi
-// const char* ssid = "Optus_53BE2F";
-// const char* password = "kudzuzerdauRX5r";
-
-// Work Phone Wifi
-// const char* ssid = "IPY6J60VPXF0";
-// const char* password = "password133";
-
-// Dean Phone Wifi
-// const char* ssid = "Deen";
-// const char* password = "password";
+const char* ap_ssid = "GravityWorx-Timer";
+const char* ap_password = "climbing123";  // Min 8 chars, or "" for open network
+DNSServer dnsServer;
+const byte DNS_PORT = 53;
 
 //loop check
 unsigned long loopCount = 0;
@@ -159,6 +150,13 @@ const unsigned long AUTO_START_DELAY = 3000;
 // WiFi timeout
 unsigned long startTime = millis();
 unsigned long timeout = 30000;
+
+void handleCaptivePortal() {
+  // Redirect all requests to the main page for captive portal
+  server.sendHeader("Location", "http://" + WiFi.softAPIP().toString(), true);
+  server.send(302, "text/plain", "");
+  handleRoot();
+}
 
 // Utility Functions
 bool isAnyTimerRunning() {
@@ -651,13 +649,22 @@ void handleStartButton() {
 }
 
 void determineWinner() {
-  if ((leftFinished || rightFinished) && !falseStartOccurred) {
-    if (leftFinished && !rightFinished) {
+  bool leftDNF = !leftFinished && !leftFalseStart && completionTimeLeft == 0 && (currentElapsedTime > 0 || resetTimeoutActive);
+  bool rightDNF = !rightFinished && !rightFalseStart && completionTimeRight == 0 && (currentElapsedTime > 0 || resetTimeoutActive);
+  
+  if ((leftFinished || rightFinished || leftDNF || rightDNF) && !falseStartOccurred) {
+    if (leftFinished && !rightFinished && !rightDNF) {
       setLeftLEDs(CRGB::Green);
       setRightLEDs(CRGB::Red);
-    } else if (rightFinished && !leftFinished) {
+    } else if (rightFinished && !leftFinished && !leftDNF) {
       setRightLEDs(CRGB::Green);
       setLeftLEDs(CRGB::Red);
+    } else if (leftFinished && rightDNF) {
+      setLeftLEDs(CRGB::Green);
+      setRightLEDs(CRGB::Orange); // Keep orange for DNF
+    } else if (rightFinished && leftDNF) {
+      setRightLEDs(CRGB::Green);
+      setLeftLEDs(CRGB::Orange); // Keep orange for DNF
     } else if (leftFinished && rightFinished) {
       if (completionTimeLeft < completionTimeRight) {
         setLeftLEDs(CRGB::Green);
@@ -670,11 +677,22 @@ void determineWinner() {
         setRightLEDs(CRGB::Green);
       }
     }
+    // Both DNF case - no winner
+    else if (leftDNF && rightDNF) {
+      setLeftLEDs(CRGB::Orange);
+      setRightLEDs(CRGB::Orange);
+    }
   } else if (falseStartOccurred) {
     if (!leftFalseStart && rightFalseStart && leftFinished) {
       setLeftLEDs(CRGB::Green);
     } else if (!rightFalseStart && leftFalseStart && rightFinished) {
       setRightLEDs(CRGB::Green);
+    }
+    // Handle DNF with false start
+    else if (!leftFalseStart && rightFalseStart && leftDNF) {
+      setLeftLEDs(CRGB::Orange); // DNF but no false start
+    } else if (!rightFalseStart && leftFalseStart && rightDNF) {
+      setRightLEDs(CRGB::Orange); // DNF but no false start  
     }
   }
 }
@@ -742,6 +760,13 @@ void updateLastState() {
 }
 
 void updateWebSocket() {
+  // Skip processing if no clients connected
+  if (!hasConnectedClients()) {
+    // Still update last state to prevent flooding when clients reconnect
+    updateLastState();
+    return;
+  }
+
   unsigned long currentTime = millis();
   bool shouldUpdate = false;
 
@@ -759,7 +784,7 @@ void updateWebSocket() {
   }
 }
 
-void sendWebSocketUpdate() {
+DynamicJsonDocument buildStatusJson() {
   if (isAnyTimerRunning()) {
     currentElapsedTime = millis() - timerStartTime;
   }
@@ -767,6 +792,8 @@ void sendWebSocketUpdate() {
   DynamicJsonDocument doc(1024);
 
   doc["is_timer_running"] = isAnyTimerRunning();
+  doc["is_timer_running_left"] = isTimerRunningLeft;  // Added for DNF button logic
+  doc["is_timer_running_right"] = isTimerRunningRight; // Added for DNF button logic
   doc["is_playing_audio"] = isPlayingAudio;
   doc["is_playing_false_start"] = isPlayingFalseStart;
   doc["false_start_occurred"] = falseStartOccurred;
@@ -795,12 +822,23 @@ void sendWebSocketUpdate() {
   doc["reaction_time_right"] = rightReactionCalculated ? rightReactionTime : 0;
   doc["formatted_reaction_time_right"] = formatSignedTime(rightReactionCalculated ? rightReactionTime : 0);
   doc["kids_mode_sensors_enabled"] = kidsModeSensorsEnabled;
+  doc["competition_complete"] = (leftFinished || rightFinished) && !isAnyTimerRunning();
+
+  doc["left_dnf"] = !leftFinished && !leftFalseStart && completionTimeLeft == 0 && (currentElapsedTime > 0 || resetTimeoutActive);
+  doc["right_dnf"] = !rightFinished && !rightFalseStart && completionTimeRight == 0 && (currentElapsedTime > 0 || resetTimeoutActive);
 
   doc["uptime"] = millis();
 
-  String message;
-  serializeJson(doc, message);
-  webSocket.broadcastTXT(message);
+  return doc;
+}
+
+bool hasConnectedClients() {
+  for (uint8_t i = 0; i < webSocket.connectedClients(); i++) {
+    if (webSocket.clientIsConnected(i)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 String formatTime(unsigned long milliseconds) {
@@ -839,13 +877,13 @@ String formatSignedTime(long milliseconds) {
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_DISCONNECTED:
-      Serial.printf("WebSocket client #%u disconnected\n", num);
+      Serial.printf("WebSocket client #%u disconnected (Total clients: %u)\n", num, webSocket.connectedClients());
       break;
 
     case WStype_CONNECTED:
       {
         IPAddress ip = webSocket.remoteIP(num);
-        Serial.printf("WebSocket client #%u connected from %d.%d.%d.%d\n", num, ip[0], ip[1], ip[2], ip[3]);
+        Serial.printf("WebSocket client #%u connected from %d.%d.%d.%d (Total clients: %u)\n", num, ip[0], ip[1], ip[2], ip[3], webSocket.connectedClients());
         sendWebSocketUpdate();
       }
       break;
@@ -881,6 +919,10 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
           singlePlayerMode = !singlePlayerMode;
         } else if (command == "toggle_kids_mode") {
           kidsModeSensorsEnabled = !kidsModeSensorsEnabled;
+        } else if (command == "dnf_left") {
+          handleDNF(true);  // true for left climber
+        } else if (command == "dnf_right") {
+          handleDNF(false); // false for right climber
         }
         sendWebSocketUpdate();
       }
@@ -888,6 +930,42 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
 
     default:
       break;
+  }
+}
+
+void handleDNF(bool isLeft) {
+  // Only allow DNF if timer is running and climber hasn't already finished
+  if (isAnyTimerRunning()) {
+    if (isLeft && !leftFinished && !leftFalseStart) {
+      // Stop left timer but don't set completion time
+      isTimerRunningLeft = false;
+      leftFinished = false;  // Keep as false to indicate DNF
+      completionTimeLeft = 0; // Ensure it stays 0 for DNF
+      
+      // Set LEDs to indicate DNF
+      setLeftLEDs(CRGB::Orange);
+      
+    } else if (!isLeft && !rightFinished && !rightFalseStart) {
+      // Stop right timer but don't set completion time  
+      isTimerRunningRight = false;
+      rightFinished = false;  // Keep as false to indicate DNF
+      completionTimeRight = 0; // Ensure it stays 0 for DNF
+      
+      // Set LEDs to indicate DNF
+      setRightLEDs(CRGB::Orange);
+    }
+    
+    // If both timers stopped, end the competition
+    if (!isAnyTimerRunning()) {
+      currentElapsedTime = millis() - timerStartTime;
+      resetTimeoutActive = true;
+      lastEventTime = millis();
+      
+      // Determine winner (the one who didn't DNF)
+      determineWinner();
+    }
+    
+    sendWebSocketUpdate();
   }
 }
 
@@ -978,7 +1056,6 @@ void handleRoot() {
     .false-start { 
       background: linear-gradient(135deg, rgba(220,38,38,0.8), rgba(185,28,28,0.9));
       border: 2px solid #dc2626;
-      animation: pulse-red 0.5s ease-in-out infinite alternate;
     }
     
     @keyframes pulse-green {
@@ -1039,6 +1116,12 @@ void handleRoot() {
     .completion-time { 
       background: linear-gradient(135deg, rgba(34,197,94,0.3), rgba(22,163,74,0.4)); 
       box-shadow: 0 3px 12px rgba(34,197,94,0.2);
+    }
+
+    .winner-time {
+      background: rgba(255,215,0,0.3) !important; 
+      border: 2px solid gold;
+      animation: winner-glow 1s ease-in-out infinite alternate;
     }
     
     .winner { 
@@ -1140,7 +1223,182 @@ void handleRoot() {
       border: 1px solid rgba(255,255,255,0.25);
       box-shadow: 0 6px 20px rgba(0,0,0,0.15);
       line-height: 1.4;
+      display: none; /* Hidden by default */
+      grid-column: 1 / -1;
     }
+        
+    .help-button {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(37, 99, 235, 0.4));
+      border: 2px solid rgba(59, 130, 246, 0.6);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: bold;
+      transition: all 0.3s ease;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+      width: 100%;
+      max-width: 120px;
+      min-height: 36px;
+    }
+    .help-button:hover {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(37, 99, 235, 0.5));
+      transform: translateY(-1px);
+      box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+    }
+    
+    /* Times Log Styles */
+    .times-log {
+      background: linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+      padding: 20px;
+      border-radius: 15px;
+      margin: 30px 0 0 0;
+      border: 1px solid rgba(255,255,255,0.25);
+      box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+    }
+    
+    .log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+    
+    .log-controls button {
+      font-size: 12px;
+      padding: 8px 16px;
+      margin-left: 10px;
+      max-width: none;
+      width: auto;
+    }
+    
+    .log-entry {
+      background: rgba(255,255,255,0.1);
+      padding: 12px;
+      margin: 8px 0;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.2);
+      font-size: 0.9em;
+    }
+
+    /* Only apply winner styling for competition mode or multi-person single player */
+    .log-entry.winner-left {
+      border-left: 4px solid #FFD700;
+      background: linear-gradient(135deg, rgba(255,215,0,0.15), rgba(255,215,0,0.08));
+      box-shadow: 0 0 10px rgba(255,215,0,0.3);
+    }
+
+    .log-entry.winner-right {
+      border-left: 4px solid #FFD700;
+      background: linear-gradient(135deg, rgba(255,215,0,0.15), rgba(255,215,0,0.08));
+      box-shadow: 0 0 10px rgba(255,215,0,0.3);
+    }
+
+    .log-entry.single-player {
+      border-left: 4px solid #FF9800;
+    }
+
+    .log-entry-header {
+      font-weight: bold;
+      margin-bottom: 5px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .winner-badge {
+      color: #FFD700;
+      font-weight: bold;
+      text-shadow: 0 0 5px rgba(255,215,0,0.5);
+    }
+
+    /* Flexible grid layout for log times */
+    .log-times {
+      margin-top: 8px;
+    }
+
+    .log-times.two-column {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .log-times.single-column {
+      display: flex;
+      justify-content: center;
+    }
+
+    .log-times.single-column .log-time {
+      max-width: 300px;
+      width: 100%;
+    }
+
+    .log-time {
+      background: rgba(0,0,0,0.2);
+      padding: 8px;
+      border-radius: 6px;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    /* Only apply false-start styling in competition mode */
+    .log-time.false-start {
+      background: rgba(220,38,38,0.3);
+      color: #ff8a80;
+      border: 1px solid rgba(220,38,38,0.5);
+    }
+    
+    .empty-log {
+      text-align: center;
+      color: rgba(255,255,255,0.7);
+      font-style: italic;
+      padding: 20px;
+    }
+    
+    .kids-mode-toggle {
+        background: rgba(255,255,255,0.15);
+        border: 2px solid rgba(255,255,255,0.4);
+        padding: 12px 24px;
+        border-radius: 30px;
+        font-size: 14px;
+        font-weight: bold;
+        position: relative;
+        overflow: hidden;
+        transition: all 0.4s ease;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+        width: 100%;
+        max-width: 240px;
+      }
+      .kids-mode-toggle.enabled {
+        background: linear-gradient(135deg, #FF6B35, #FF8E53);
+        border-color: #FF5722;
+        box-shadow: 0 6px 20px rgba(255, 107, 53, 0.5);
+      }
+      .kids-mode-toggle.disabled {
+        background: linear-gradient(135deg, #666, #888);
+        border-color: #555;
+        box-shadow: 0 6px 20px rgba(102, 102, 102, 0.3);
+      }
+      .kids-mode-toggle:hover {
+        transform: translateY(-2px) scale(1.02);
+        box-shadow: 0 8px 25px rgba(255,255,255,0.3);
+      }
+
+      .dnf-button {
+        background: linear-gradient(135deg, rgba(220,38,38,0.3), rgba(185,28,28,0.4));
+        border: 2px solid rgba(220,38,38,0.6);
+        color: #ff8a80;
+        font-weight: bold;
+        padding: 8px 16px;
+        margin: 8px auto;  /* This auto margin works with display: block */
+        border-radius: 8px;
+        font-size: 0.9em;
+        width: 150px;      /* Fixed width instead of max-width */
+        display: block;    /* Add this to make the button a block element */
+      }
+      .dnf-button:hover {
+        background: linear-gradient(135deg, rgba(220,38,38,0.4), rgba(185,28,28,0.5));
+        transform: translateY(-1px);
+      }
     
     @media (min-width: 768px) {
       body {
@@ -1173,6 +1431,10 @@ void handleRoot() {
         font-size: 0.9em;
       }
       
+      .times-log {
+        grid-column: 1 / -1;
+      }
+      
       .timer-display {
         font-size: 3.6em;
         padding: 25px;
@@ -1200,6 +1462,11 @@ void handleRoot() {
       .mode-toggle {
         width: auto;
       }
+      
+      .help-button {
+        max-width: 150px;
+        font-size: 14px;
+      }
     }
     
     @media (min-width: 1024px) {
@@ -1212,6 +1479,24 @@ void handleRoot() {
       }
     }
     
+    /* Mobile responsive adjustments */
+    @media (max-width: 768px) {
+      .log-times.two-column {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      
+      .log-entry-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+      }
+      
+      .winner-badge {
+        align-self: flex-end;
+      }
+    }
+
     @media (max-width: 360px) {
       body {
         padding: 5px;
@@ -1248,35 +1533,18 @@ void handleRoot() {
       .climber-panel {
         padding: 15px;
       }
+      
+      .log-times {
+        grid-template-columns: 1fr;
+      }
+      
+      .help-button {
+        font-size: 11px;
+        padding: 6px 12px;
+        max-width: 100px;
+        min-height: 32px;
+      }
     }
-    .kids-mode-toggle {
-        background: rgba(255,255,255,0.15);
-        border: 2px solid rgba(255,255,255,0.4);
-        padding: 12px 24px;
-        border-radius: 30px;
-        font-size: 14px;
-        font-weight: bold;
-        position: relative;
-        overflow: hidden;
-        transition: all 0.4s ease;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.4);
-        width: 100%;
-        max-width: 240px;
-      }
-      .kids-mode-toggle.enabled {
-        background: linear-gradient(135deg, #FF6B35, #FF8E53);
-        border-color: #FF5722;
-        box-shadow: 0 6px 20px rgba(255, 107, 53, 0.5);
-      }
-      .kids-mode-toggle.disabled {
-        background: linear-gradient(135deg, #666, #888);
-        border-color: #555;
-        box-shadow: 0 6px 20px rgba(102, 102, 102, 0.3);
-      }
-      .kids-mode-toggle:hover {
-        transform: translateY(-2px) scale(1.02);
-        box-shadow: 0 8px 25px rgba(255,255,255,0.3);
-      }
   </style>
 </head>
 <body>
@@ -1292,6 +1560,7 @@ void handleRoot() {
         <div id='foot-status-left' class='foot-sensor foot-released'>Foot Sensor: None</div>
         <div id='reaction-time-left' class='reaction-time' style='display:none'>Reaction: 0:00.000</div>
         <div id='completion-time-left' class='completion-time' style='display:none'>Time: 0:00.000</div>
+        <button onclick='markDNF("left")' id='dnf-left-btn' class='dnf-button' style='display:none'>❌ Mark DNF</button>
       </div>
       
       <div class='climber-panel right-panel'>
@@ -1300,16 +1569,18 @@ void handleRoot() {
         <div id='foot-status-right' class='foot-sensor foot-released'>Foot Sensor: None</div>
         <div id='reaction-time-right' class='reaction-time' style='display:none'>Reaction: 0:00.000</div>
         <div id='completion-time-right' class='completion-time' style='display:none'>Time: 0:00.000</div>
+        <button onclick='markDNF("right")' id='dnf-right-btn' class='dnf-button' style='display:none'>❌ Mark DNF</button>
       </div>
       
       <div class='button-group'>
         <button onclick='startSequence()' id='startBtn'>🚀 Start Competition</button>
         <button onclick='resetTimer()' id='resetBtn'>🔄 Reset</button>
         <button onclick='toggleMode()' id='modeBtn' class='mode-toggle competition-mode'>🏆 Competition Mode</button>
-        <button onclick='toggleKidsMode()' id='kidsModeBtn' class='kids-mode-toggle disabled'>🤸 Kids Sensors: OFF</button>
+        <button onclick='toggleKidsMode()' id='kidsModeBtn' class='kids-mode-toggle disabled'>🤸 Blue Sensors: OFF</button>
+        <button onclick='toggleHelp()' id='helpBtn' class='help-button'>❓ Help</button>
       </div>
       
-      <div class='instructions'>
+      <div class='instructions' id='instructions'>
         <strong id='instructions-title'>Single Player Instructions:</strong><br>
         <span id='instructions-text'>
           1. Press and hold <b>ONE</b> foot sensor<br>
@@ -1317,20 +1588,396 @@ void handleRoot() {
           3. Keep foot sensor pressed during entire audio countdown<br>
           4. Start climbing on the high picthed start tone<br>
           5. Hit your stop sensor when you reach the top<br>
+          False starts as per IFSC are calucated at 0.1 seconds after the start tone sounds
         </span>
+      </div>
+      
+      <!-- Times Log Section -->
+      <div class='times-log'>
+        <div class='log-header'>
+          <h2>Times Log</h2>
+          <div class='log-controls'>
+            <button onclick='clearLog()'>Clear Log</button>
+            <button onclick='exportLog()'>Export CSV</button>
+          </div>
+        </div>
+        <div id='log-entries'>
+          <div class='empty-log'>No times recorded yet. Complete a competition to see results here.</div>
+        </div>
       </div>
     </div>
   </div>
 
   <script>
     let ws;
+    let timesLog = [];
+    let lastCompetitionComplete = false;
+    let helpVisible = false;
+
+    // Toggle help instructions
+    function toggleHelp() {
+      const instructionsDiv = document.getElementById('instructions');
+      const helpBtn = document.getElementById('helpBtn');
+      
+      helpVisible = !helpVisible;
+      
+      if (helpVisible) {
+        instructionsDiv.style.display = 'block';
+        helpBtn.textContent = '❌ Hide Help';
+      } else {
+        instructionsDiv.style.display = 'none';
+        helpBtn.textContent = '❓ Help';
+      }
+    }
+
+    function markDNF(side) {
+      if (confirm(`Mark ${side} climber as Did Not Finish?`)) {
+        ws.send(`dnf_${side}`);
+      }
+    }
+
+    // Load saved log from localStorage
+    function loadLog() {
+      const saved = localStorage.getItem('gravityWorxTimesLog');
+      if (saved) {
+        timesLog = JSON.parse(saved);
+        renderLog();
+      }
+    }
+
+    // Save log to localStorage
+    function saveLog() {
+      localStorage.setItem('gravityWorxTimesLog', JSON.stringify(timesLog));
+    }
+
+    // Add entry to log
+    function addLogEntry(data) {
+      const timestamp = new Date();
+      const entry = {
+        timestamp: timestamp.toISOString(),
+        date: timestamp.toLocaleDateString(),
+        time: timestamp.toLocaleTimeString(),
+        singlePlayerMode: data.single_player_mode,
+        leftTime: data.completion_time_left || 0,
+        rightTime: data.completion_time_right || 0,
+        leftReaction: data.reaction_time_left || 0,
+        rightReaction: data.reaction_time_right || 0,
+        leftFalseStart: data.left_false_start || false,
+        rightFalseStart: data.right_false_start || false,
+        leftFinished: data.left_finished || false,
+        rightFinished: data.right_finished || false,
+        formattedLeftTime: data.formatted_completion_time_left || '0:00.000',
+        formattedRightTime: data.formatted_completion_time_right || '0:00.000',
+        formattedLeftReaction: data.formatted_reaction_time_left || '0:00.000',
+        formattedRightReaction: data.formatted_reaction_time_right || '0:00.000'
+      };
+
+      timesLog.unshift(entry); // Add to beginning
+      if (timesLog.length > 100) { // Keep only last 100 entries
+        timesLog = timesLog.slice(0, 100);
+      }
+      
+      saveLog();
+      renderLog();
+    }
+
+    // Render log entries
+    function renderLog() {
+      const logContainer = document.getElementById('log-entries');
+      
+      if (timesLog.length === 0) {
+        logContainer.innerHTML = '<div class="empty-log">No times recorded yet. Complete a competition to see results here.</div>';
+        return;
+      }
+
+      let html = '';
+      timesLog.forEach((entry, index) => {
+        let entryClass = 'log-entry';
+        let winner = '';
+        let showWinner = false;
+        let leftIsWinner = false;
+        let rightIsWinner = false;
+        
+        if (entry.singlePlayerMode) {
+          entryClass += ' single-player';
+          // For single player, only show winner styling if both lanes have valid times (indicating a race between two single players)
+          const leftHasTime = entry.leftFinished && !entry.leftFalseStart && entry.leftTime > 0;
+          const rightHasTime = entry.rightFinished && !entry.rightFalseStart && entry.rightTime > 0;
+          
+          if (leftHasTime && rightHasTime) {
+            showWinner = true;
+            if (entry.leftTime < entry.rightTime) {
+              winner = 'Left Climber';
+              leftIsWinner = true;
+            } else if (entry.rightTime < entry.leftTime) {
+              winner = 'Right Climber';
+              rightIsWinner = true;
+            } else {
+              winner = 'Tie';
+              leftIsWinner = true;
+              rightIsWinner = true;
+            }
+          } else if (leftHasTime) {
+            winner = 'Left Climber';
+            leftIsWinner = true;
+          } else if (rightHasTime) {
+            winner = 'Right Climber';
+            rightIsWinner = true;
+          }
+        } else {
+          // Competition mode - keep existing logic but only show winner for valid completions
+          const leftValid = entry.leftFinished && !entry.leftFalseStart;
+          const rightValid = entry.rightFinished && !entry.rightFalseStart;
+          
+          if (leftValid || rightValid) {
+            showWinner = true;
+            if (entry.leftFalseStart && !entry.rightFalseStart && entry.rightFinished) {
+              winner = 'Right Climber';
+              rightIsWinner = true;
+            } else if (entry.rightFalseStart && !entry.leftFalseStart && entry.leftFinished) {
+              winner = 'Left Climber';
+              leftIsWinner = true;
+            } else if (leftValid && rightValid) {
+              if (entry.leftTime < entry.rightTime) {
+                winner = 'Left Climber';
+                leftIsWinner = true;
+              } else if (entry.rightTime < entry.leftTime) {
+                winner = 'Right Climber';
+                rightIsWinner = true;
+              } else {
+                winner = 'Tie';
+                leftIsWinner = true;
+                rightIsWinner = true;
+              }
+            } else if (leftValid) {
+              winner = 'Left Climber';
+              leftIsWinner = true;
+            } else if (rightValid) {
+              winner = 'Right Climber';
+              rightIsWinner = true;
+            }
+          }
+        }
+
+        // Determine which times to show based on mode and actual data
+        let leftTimeDisplay = '';
+        let rightTimeDisplay = '';
+        let showLeftTime = false;
+        let showRightTime = false;
+
+        if (entry.singlePlayerMode) {
+          // In single player, only show times that actually have data
+          if (entry.leftFinished || entry.leftFalseStart || entry.leftTime > 0) {
+            showLeftTime = true;
+            if (entry.leftFinished && entry.leftTime > 0) {
+              leftTimeDisplay = `
+                <div class="log-time ${leftIsWinner ? 'winner-time' : ''}">
+                  <strong>Left:</strong><br>
+                  Time: ${entry.formattedLeftTime}<br>
+                  Reaction: ${entry.formattedLeftReaction}
+                </div>
+              `;
+            } else if (entry.leftFalseStart) {
+              leftTimeDisplay = `
+                <div class="log-time">
+                  <strong>Left:</strong><br>
+                  Time: DQ (False Start)<br>
+                  Reaction: ${entry.formattedLeftReaction}
+                </div>
+              `;
+            } else {
+              leftTimeDisplay = `
+                <div class="log-time">
+                  <strong>Left:</strong><br>
+                  Time: DNF<br>
+                  Reaction: ${entry.formattedLeftReaction}
+                </div>
+              `;
+            }
+          }
+
+          if (entry.rightFinished || entry.rightFalseStart || entry.rightTime > 0) {
+            showRightTime = true;
+            if (entry.rightFinished && entry.rightTime > 0) {
+              rightTimeDisplay = `
+                <div class="log-time ${rightIsWinner ? 'winner-time' : ''}">
+                  <strong>Right:</strong><br>
+                  Time: ${entry.formattedRightTime}<br>
+                  Reaction: ${entry.formattedRightReaction}
+                </div>
+              `;
+            } else if (entry.rightFalseStart) {
+              rightTimeDisplay = `
+                <div class="log-time">
+                  <strong>Right:</strong><br>
+                  Time: DQ (False Start)<br>
+                  Reaction: ${entry.formattedRightReaction}
+                </div>
+              `;
+            } else {
+              rightTimeDisplay = `
+                <div class="log-time">
+                  <strong>Right:</strong><br>
+                  Time: DNF<br>
+                  Reaction: ${entry.formattedRightReaction}
+                </div>
+              `;
+            }
+          }
+        } else {
+          // Competition mode - show both times
+          showLeftTime = true;
+          showRightTime = true;
+          
+          leftTimeDisplay = `
+            <div class="log-time ${entry.leftFalseStart ? 'false-start' : ''} ${leftIsWinner ? 'winner-time' : ''}">
+              <strong>Left:</strong><br>
+              Time: ${entry.leftFinished ? entry.formattedLeftTime : 'DNF'}${entry.leftFalseStart ? ' (DQ)' : ''}<br>
+              Reaction: ${entry.formattedLeftReaction}
+            </div>
+          `;
+          
+          rightTimeDisplay = `
+            <div class="log-time ${entry.rightFalseStart ? 'false-start' : ''} ${rightIsWinner ? 'winner-time' : ''}">
+              <strong>Right:</strong><br>
+              Time: ${entry.rightFinished ? entry.formattedRightTime : 'DNF'}${entry.rightFalseStart ? ' (DQ)' : ''}<br>
+              Reaction: ${entry.formattedRightReaction}
+            </div>
+          `;
+        }
+
+        // Determine grid layout based on what's being shown
+        let gridClass = 'log-times';
+        if (showLeftTime && showRightTime) {
+          gridClass = 'log-times two-column';
+        } else {
+          gridClass = 'log-times single-column';
+        }
+
+        html += `
+          <div class="${entryClass}">
+            <div class="log-entry-header">
+              <span>${entry.date} ${entry.time} - ${entry.singlePlayerMode ? 'Single Player' : 'Competition'}</span>
+            </div>
+            <div class="${gridClass}">
+              ${showLeftTime ? leftTimeDisplay : ''}
+              ${showRightTime ? rightTimeDisplay : ''}
+            </div>
+          </div>
+        `;
+      });
+      
+      logContainer.innerHTML = html;
+    }
+
+    // Clear log
+    function clearLog() {
+      if (confirm('Are you sure you want to clear all logged times? This cannot be undone.')) {
+        timesLog = [];
+        saveLog();
+        renderLog();
+      }
+    }
+
+    // Export log as CSV
+    function exportLog() {
+      if (timesLog.length === 0) {
+        alert('No data to export.');
+        return;
+      }
+
+      let csv = 'Date,Time,Mode,Left Time,Left Reaction,Left False Start,Right Time,Right Reaction,Right False Start,Winner\n';
+      
+      timesLog.forEach(entry => {
+        const leftTime = entry.leftFinished ? entry.leftTime : '';
+        const rightTime = entry.rightFinished ? entry.rightTime : '';
+        let winner = '';
+        
+        if (entry.singlePlayerMode) {
+          if (entry.leftFinished && !entry.leftFalseStart) winner = 'Left';
+          else if (entry.rightFinished && !entry.rightFalseStart) winner = 'Right';
+        } else {
+          if (entry.leftFalseStart && !entry.rightFalseStart && entry.rightFinished) winner = 'Right';
+          else if (entry.rightFalseStart && !entry.leftFalseStart && entry.leftFinished) winner = 'Left';
+          else if (!entry.leftFalseStart && !entry.rightFalseStart && entry.leftFinished && entry.rightFinished) {
+            winner = entry.leftTime < entry.rightTime ? 'Left' : entry.rightTime < entry.leftTime ? 'Right' : 'Tie';
+          } else if (entry.leftFinished) winner = 'Left';
+          else if (entry.rightFinished) winner = 'Right';
+        }
+        
+        csv += `"${entry.date}","${entry.time}","${entry.singlePlayerMode ? 'Single' : 'Competition'}",${leftTime},${entry.leftReaction},${entry.leftFalseStart},${rightTime},${entry.rightReaction},${entry.rightFalseStart},"${winner}"\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `gravity-worx-times-${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    }
+
     function toggleKidsMode() { ws.send('toggle_kids_mode'); }
+    
     function connectWebSocket() {
       const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(protocol + '://' + location.hostname + ':81');
       ws.onopen = function() { console.log('WebSocket connected'); };
       ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
+        const footLeftDiv = document.getElementById('foot-status-left');
+        const footRightDiv = document.getElementById('foot-status-right');
+
+        if(data.is_timer_running || data.competition_complete) {
+          footLeftDiv.style.display = 'none';
+          footRightDiv.style.display = 'none';
+        } else 
+        {
+          // Show foot sensor status when timer is not running
+          footLeftDiv.style.display = 'block';
+          
+          if(data.foot_left_pressed) {
+            footLeftDiv.textContent = 'Foot Sensor: Pressed';
+            footLeftDiv.className = 'foot-sensor foot-pressed';
+          } else {
+            footLeftDiv.textContent = 'Foot Sensor: None';
+            footLeftDiv.className = 'foot-sensor foot-released';
+          }
+          
+          footRightDiv.style.display = 'block';
+          
+          if(data.foot_right_pressed) {
+            footRightDiv.textContent = 'Foot Sensor: Pressed';
+            footRightDiv.className = 'foot-sensor foot-pressed';
+          } else {
+            footRightDiv.textContent = 'Foot Sensor: None';
+            footRightDiv.className = 'foot-sensor foot-released';
+          }
+        }
+
+        // Check if competition just completed and auto-save
+        if (data.competition_complete && !lastCompetitionComplete) {
+          if (data.completion_time_left > 0 || data.completion_time_right > 0) {
+            addLogEntry(data);
+          }
+        }
+
+        const dnfLeftBtn = document.getElementById('dnf-left-btn');
+        const dnfRightBtn = document.getElementById('dnf-right-btn');
+
+        if (data.is_timer_running && data.is_timer_running_left && !data.left_finished && !data.left_false_start) {
+          dnfLeftBtn.style.display = 'block';
+        } else {
+          dnfLeftBtn.style.display = 'none';
+        }
+
+        if (data.is_timer_running && data.is_timer_running_right && !data.right_finished && !data.right_false_start) {
+          dnfRightBtn.style.display = 'block';
+        } else {
+          dnfRightBtn.style.display = 'none';
+        }
+
+        lastCompetitionComplete = data.competition_complete;
         
         const leftTimer = document.getElementById('timer-left');
         const rightTimer = document.getElementById('timer-right');
@@ -1366,26 +2013,7 @@ void handleRoot() {
           rightTimer.textContent = '0:00.000';
           rightTimer.style.background = 'rgba(100,100,100,0.2)';
         }
-        
-        const footLeftDiv = document.getElementById('foot-status-left');
-        const footRightDiv = document.getElementById('foot-status-right');
-        
-        if(data.foot_left_pressed) {
-          footLeftDiv.textContent = 'Foot Sensor: Pressed';
-          footLeftDiv.className = 'foot-sensor foot-pressed';
-        } else {
-          footLeftDiv.textContent = 'Foot Sensor: None';
-          footLeftDiv.className = 'foot-sensor foot-released';
-        }
-        
-        if(data.foot_right_pressed) {
-          footRightDiv.textContent = 'Foot Sensor: Pressed';
-          footRightDiv.className = 'foot-sensor foot-pressed';
-        } else {
-          footRightDiv.textContent = 'Foot Sensor: None';
-          footRightDiv.className = 'foot-sensor foot-released';
-        }
-        
+                
         const modeBtn = document.getElementById('modeBtn');
         if(data.single_player_mode) {
           modeBtn.textContent = '👤 Single Player Mode';
@@ -1397,10 +2025,10 @@ void handleRoot() {
 
         const kidsModeBtn = document.getElementById('kidsModeBtn');
         if(data.kids_mode_sensors_enabled) {
-          kidsModeBtn.textContent = '🤸 Kids Sensors: ON';
+          kidsModeBtn.textContent = '🤸 Blue Sensors: ON';
           kidsModeBtn.className = 'kids-mode-toggle enabled';
         } else {
-          kidsModeBtn.textContent = '🤸 Kids Sensors: OFF';
+          kidsModeBtn.textContent = '🤸 Blue Sensors: OFF';
           kidsModeBtn.className = 'kids-mode-toggle disabled';
         }
         
@@ -1414,6 +2042,7 @@ void handleRoot() {
             3. Keep foot sensor pressed during entire audio countdown<br>
             4. Start climbing on the high picthed start tone<br>
             5. Hit your stop sensor when you reach the top<br>
+            False starts as per IFSC are calucated at 0.1 seconds after the start tone sounds
           `;
         } else {
           instructionsTitle.textContent = 'Competition Instructions:';
@@ -1423,7 +2052,8 @@ void handleRoot() {
             3. Keep foot sensors pressed during entire audio countdown<br>
             4. Start climbing on the high picthed start tone<br>
             5. Hit your stop sensor when you reach the top<br>
-            <strong>Both climbers can still finish even if one false starts</strong>
+            False starts as per IFSC are calucated at 0.1 seconds after the start tone sounds<br>
+            <strong>Both climbers can still finish even if one false starts</strong><br>
           `;
         }
         
@@ -1592,6 +2222,8 @@ void handleRoot() {
     function resetTimer() { ws.send('reset'); }
     function toggleMode() { ws.send('toggle_mode'); }
 
+    // Load log on page load
+    loadLog();
     connectWebSocket();
   </script>
 </body>
@@ -1602,41 +2234,21 @@ void handleRoot() {
 }
 
 void handleApiStatus() {
-  DynamicJsonDocument doc(1024);
-
-  doc["is_timer_running"] = isAnyTimerRunning();
-  doc["is_playing_audio"] = isPlayingAudio;
-  doc["is_playing_false_start"] = isPlayingFalseStart;
-  doc["false_start_occurred"] = falseStartOccurred;
-  doc["left_false_start"] = leftFalseStart;
-  doc["right_false_start"] = rightFalseStart;
-  doc["single_player_mode"] = singlePlayerMode;
-
-  doc["foot_left_pressed"] = footLeftPressed;
-  doc["foot_right_pressed"] = footRightPressed;
-  doc["both_feet_ready"] = footLeftPressed && footRightPressed;
-  doc["ready_to_start"] = singlePlayerMode ? (footLeftPressed || footRightPressed) : (footLeftPressed && footRightPressed);
-
-  doc["elapsed_time"] = currentElapsedTime;
-  doc["formatted_time"] = formatTime(currentElapsedTime);
-
-  doc["reaction_time_left"] = reactionTimeLeft;
-  doc["formatted_reaction_time_left"] = formatSignedTime(reactionTimeLeft);
-  doc["completion_time_left"] = completionTimeLeft;
-  doc["formatted_completion_time_left"] = formatTime(completionTimeLeft);
-  doc["left_finished"] = leftFinished;
-
-  doc["reaction_time_right"] = reactionTimeRight;
-  doc["formatted_reaction_time_right"] = formatSignedTime(reactionTimeRight);
-  doc["completion_time_right"] = completionTimeRight;
-  doc["formatted_completion_time_right"] = formatTime(completionTimeRight);
-  doc["right_finished"] = rightFinished;
-
-  doc["uptime"] = millis();
-
+  DynamicJsonDocument doc = buildStatusJson();
   String response;
   serializeJson(doc, response);
   server.send(200, "application/json", response);
+}
+
+void sendWebSocketUpdate() {
+  if (!hasConnectedClients()) {
+    return;
+  }
+
+  DynamicJsonDocument doc = buildStatusJson();
+  String message;
+  serializeJson(doc, message);
+  webSocket.broadcastTXT(message);
 }
 
 void handleApiStart() {
@@ -1701,20 +2313,26 @@ void setup() {
   ledcAttach(AUDIO_PIN, 1000, LEDC_RESOLUTION);
   ledcWrite(AUDIO_PIN, 0);
 
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED && (millis() - startTime) < timeout) {
-    delay(500);
-    Serial.print(".");
-  }
+  /////////////WIFI/////////////
 
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("\nWiFi connection timeout!");
-  } else {
-    Serial.println("\nWiFi connected!");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
-  }
+  Serial.println("Setting up Access Point...");
+
+  // Configure as Access Point
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ap_ssid, ap_password);
+
+  // Get AP IP address
+  IPAddress apIP = WiFi.softAPIP();
+  Serial.print("Access Point IP: ");
+  Serial.println(apIP);
+  Serial.print("Network Name: ");
+  Serial.println(ap_ssid);
+
+  // Start DNS server for captive portal
+  dnsServer.start(DNS_PORT, "*", apIP);
+  Serial.println("DNS server started for captive portal");
+
+  /////////////WIFI/////////////
 
   server.on("/", HTTP_GET, handleRoot);
   server.on("/api/status", HTTP_GET, handleApiStatus);
@@ -1723,8 +2341,14 @@ void setup() {
   server.on("/api/reset", HTTP_POST, handleApiReset);
   server.on("/api/toggle_kids_mode", HTTP_POST, handleApiToggleKidsMode);
 
+  server.on("/generate_204", HTTP_GET, handleCaptivePortal);         // Android
+  server.on("/fwlink", HTTP_GET, handleCaptivePortal);               // Microsoft
+  server.on("/hotspot-detect.html", HTTP_GET, handleCaptivePortal);  // Apple
+  server.onNotFound(handleCaptivePortal);                            // Catch all other requests
+
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
+  webSocket.enableHeartbeat(1000, 500, 2);  // ping every 15s, timeout 3s, disconnect after 2 failed pings
 
   server.begin();
   Serial.println("HTTP server started");
@@ -1744,14 +2368,16 @@ void loop() {
 
   lastLoopTime = millis() - loopStart;
 
-  // Display stats every second
-  if (millis() - lastTime >= 1000) {
-    Serial.print("Loops/sec: ");
-    Serial.print(loopCount);
-    Serial.print(" | Last loop took: ");
-    Serial.print(lastLoopTime);
-    Serial.println(" ms");
-
+  // Display stats every second and checks dns (10 times per second)
+  if (millis() - lastTime >= 100) {
+    dnsServer.processNextRequest();
+    if (loopCount < 80) {
+      Serial.print("Loops/sec: ");
+      Serial.print(loopCount);
+      Serial.print(" | Last loop took: ");
+      Serial.print(lastLoopTime);
+      Serial.println(" ms");
+    }
     loopCount = 0;
     lastTime = millis();
   }
