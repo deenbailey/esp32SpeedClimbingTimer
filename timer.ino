@@ -1,3 +1,4 @@
+
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
@@ -7,10 +8,16 @@
 
 // Hardware Config
 #define START_BUTTON 19
-#define STOP_SENSOR_LEFT 14
-#define STOP_SENSOR_RIGHT 33
+
 #define FOOT_SENSOR_LEFT 13
-#define FOOT_SENSOR_RIGHT 26
+#define STOP_SENSOR_LEFT_KIDS 14
+#define STOP_SENSOR_LEFT 27
+
+#define FOOT_SENSOR_RIGHT 32
+#define STOP_SENSOR_RIGHT_KIDS 26
+#define STOP_SENSOR_RIGHT 33
+
+
 #define AUDIO_PIN 22
 
 // LED Strip Config
@@ -22,8 +29,6 @@ CRGB ledsLeft[NUM_LEDS_PER_STRIP];
 CRGB ledsRight[NUM_LEDS_PER_STRIP];
 
 // KID MODE STUFF
-#define STOP_SENSOR_LEFT_KIDS 27
-#define STOP_SENSOR_RIGHT_KIDS 32
 bool kidsModeSensorsEnabled = false;
 bool stopLeftKidsPressed = false;
 bool stopRightKidsPressed = false;
