@@ -1873,7 +1873,6 @@ void handleRoot() {
           <div class="${entryClass}">
             <div class="log-entry-header">
               <span>${entry.date} ${entry.time} - ${entry.singlePlayerMode ? 'Single Player' : 'Competition'}</span>
-              ${showWinner && winner ? `<span class="winner-badge">${winner}</span>` : ''}
             </div>
             <div class="${gridClass}">
               ${showLeftTime ? leftTimeDisplay : ''}
