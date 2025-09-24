@@ -1,4 +1,3 @@
-
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
@@ -2025,6 +2024,7 @@ void handleRoot() {
         } else {
           leftTimer.textContent = '0:00.000';
           leftTimer.style.background = 'rgba(100,100,100,0.2)';
+          leftTimer.classList.remove('false-start-text');
         }
         
         if(!data.single_player_mode || data.right_finished || data.right_false_start || data.reaction_time_right != 0 || (data.is_timer_running && data.foot_right_pressed)) {
@@ -2043,6 +2043,7 @@ void handleRoot() {
         } else {
           rightTimer.textContent = '0:00.000';
           rightTimer.style.background = 'rgba(100,100,100,0.2)';
+          rightTimer.classList.remove('false-start-text');
         }
                 
         const modeBtn = document.getElementById('modeBtn');
