@@ -29,10 +29,10 @@ CRGB ledsLeft[NUM_LEDS_PER_STRIP];
 CRGB ledsRight[NUM_LEDS_PER_STRIP];
 
 // KID MODE STUFF
-bool kidsModeSensorsEnabled = false;
+bool kidsModeSensorsEnabled = true;
 bool stopLeftKidsPressed = false;
 bool stopRightKidsPressed = false;
-bool lastKidsModeSensorsEnabled = false;
+bool lastKidsModeSensorsEnabled = true;
 
 // WiFi Config
 const char* ap_ssid = "Gravity Worx Speed Timer";
@@ -838,7 +838,9 @@ DynamicJsonDocument buildStatusJson() {
 }
 
 bool hasConnectedClients() {
-  for (uint8_t i = 0; i < webSocket.connectedClients(); i++) {
+  uint8_t totalClients = webSocket.connectedClients();
+  
+  for (uint8_t i = 0; i < totalClients; i++) {
     if (webSocket.clientIsConnected(i)) {
       return true;
     }
@@ -1032,7 +1034,27 @@ void handleRoot() {
       border-radius: 15px;
       border: 1px solid rgba(255,255,255,0.3);
       box-shadow: inset 0 2px 10px rgba(0,0,0,0.2);
-      word-break: break-all;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-height: 1.2em;
+    }
+
+
+    .timer-display.false-start-text {
+      font-size: 1.8em;
+    }
+
+    @media (max-width: 768px) {
+      .timer-display.false-start-text {
+        font-size: 1.4em;
+      }
+    }
+
+    @media (max-width: 360px) {
+      .timer-display.false-start-text {
+        font-size: 1.2em;
+      }
     }
     
     .status {
@@ -1994,9 +2016,11 @@ void handleRoot() {
           } else if(data.left_false_start) {
             leftTimer.textContent = 'FALSE START';
             leftTimer.style.background = 'rgba(220,38,38,0.3)';
+            leftTimer.classList.add('false-start-text');
           } else {
             leftTimer.textContent = data.formatted_time;
             leftTimer.style.background = 'rgba(255,255,255,0.1)';
+            leftTimer.classList.remove('false-start-text');
           }
         } else {
           leftTimer.textContent = '0:00.000';
@@ -2010,9 +2034,11 @@ void handleRoot() {
           } else if(data.right_false_start) {
             rightTimer.textContent = 'FALSE START';
             rightTimer.style.background = 'rgba(220,38,38,0.3)';
+            rightTimer.classList.add('false-start-text');
           } else {
             rightTimer.textContent = data.formatted_time;
             rightTimer.style.background = 'rgba(255,255,255,0.1)';
+            rightTimer.classList.remove('false-start-text');
           }
         } else {
           rightTimer.textContent = '0:00.000';
@@ -2246,14 +2272,45 @@ void handleApiStatus() {
 }
 
 void sendWebSocketUpdate() {
-  if (!hasConnectedClients()) {
+  // Quick check - don't build JSON if no clients
+  uint8_t totalClients = webSocket.connectedClients();
+  if (totalClients == 0) {
     return;
   }
 
   DynamicJsonDocument doc = buildStatusJson();
   String message;
   serializeJson(doc, message);
-  webSocket.broadcastTXT(message);
+  
+  unsigned long updateStart = millis(); // Track total update time
+  
+  // Send to each client individually with timeout protection
+  for(uint8_t i = 0; i < totalClients; i++) {
+    if(webSocket.clientIsConnected(i)) {
+      // Force break if we've already spent too much time
+      if(millis() - updateStart > 100) {
+        Serial.printf("Update timeout reached, skipping remaining %u clients\n", totalClients - i);
+        break;
+      }
+      
+      unsigned long sendStart = millis();
+      
+      if(!webSocket.sendTXT(i, message)) {
+        Serial.printf("Client %u send failed, disconnecting\n", i);
+        webSocket.disconnect(i);
+      } else {
+        unsigned long sendTime = millis() - sendStart;
+        if(sendTime > 50) {
+          Serial.printf("Slow send to client %u: %lu ms\n", i, sendTime);
+        }
+      }
+    }
+  }
+  
+  unsigned long totalTime = millis() - updateStart;
+  if(totalTime > 100) {
+    Serial.printf("WebSocket update took %lu ms total\n", totalTime);
+  }
 }
 
 void handleApiStart() {
@@ -2370,12 +2427,12 @@ void loop() {
   updateAudioSequence();
   updateTimer();
   updateWebSocket();
+  dnsServer.processNextRequest();
 
   lastLoopTime = millis() - loopStart;
 
   // Display stats every second and checks dns (10 times per second)
   if (millis() - lastTime >= 100) {
-    dnsServer.processNextRequest();
     if (loopCount < 80) {
       Serial.print("Loops/sec: ");
       Serial.print(loopCount);
