@@ -15,6 +15,11 @@ An ESP32 based timer for speed climbing competitions.
 #include <DNSServer.h>
 ```
 
+## ESP32 Arduino Core
+
+- **Version:** 3.3.6
+- **Repository:** [https://github.com/espressif/arduino-esp32](https://github.com/espressif/arduino-esp32)
+
 ---
 
 ## Library Versions
