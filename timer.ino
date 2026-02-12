@@ -1499,7 +1499,7 @@ void handleRoot() {
       }
       
       .timer-display {
-        font-size: 3.6em;
+        font-size: 2.8em;
         padding: 25px;
       }
       
@@ -1534,7 +1534,7 @@ void handleRoot() {
     
     @media (min-width: 1024px) {
       .timer-display {
-        font-size: 3.6em;
+        font-size: 3em;
       }
       
       h1 {
