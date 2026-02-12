@@ -33,6 +33,8 @@ bool stopLeftKidsPressed = false;
 bool stopRightKidsPressed = false;
 bool lastKidsModeSensorsEnabled = true;
 
+bool friendlyFalseStartsEnabled = false;
+
 // WiFi Config
 const char* ap_ssid = "Gravity Worx Speed Timer";
 const char* ap_password = "";  // Min 8 chars, or "" for open network
@@ -272,6 +274,10 @@ void startAudioSequence() {
 }
 
 void startFalseStartSequence() {
+  if (friendlyFalseStartsEnabled) {
+      completeFalseStartSequence();
+      return;
+    }
   isPlayingFalseStart = true;
   currentAudioStep = 0;
   audioStepStartTime = millis();
@@ -292,15 +298,17 @@ void handleAudioLEDs(const AudioStep* sequence, int frequency) {
       setLEDsBasedOnState(true, leftFalseStart, CRGB::Black);
       setLEDsBasedOnState(false, rightFalseStart, CRGB::Black);
     }
-  } else if (isPlayingFalseStart) {
-    if (frequency == 1568) {
-      if (leftFalseStart) setLeftLEDs(CRGB::Red);
-      if (rightFalseStart) setRightLEDs(CRGB::Red);
-      if (!leftFalseStart) setLeftLEDs(CRGB::Black);
-      if (!rightFalseStart) setRightLEDs(CRGB::Black);
-    } else {
-      if (leftFalseStart) setLeftLEDs(CRGB::Black);
-      if (rightFalseStart) setRightLEDs(CRGB::Black);
+  } else if (isPlayingFalseStart && !friendlyFalseStartsEnabled) {
+    if (!friendlyFalseStartsEnabled) {
+      if (frequency == 1568) {
+        if (leftFalseStart) setLeftLEDs(CRGB::Red);
+        if (rightFalseStart) setRightLEDs(CRGB::Red);
+        if (!leftFalseStart) setLeftLEDs(CRGB::Black);
+        if (!rightFalseStart) setRightLEDs(CRGB::Black);
+      } else {
+        if (leftFalseStart) setLeftLEDs(CRGB::Black);
+        if (rightFalseStart) setRightLEDs(CRGB::Black);
+      }
     }
   }
 }
@@ -491,13 +499,13 @@ void handleFootSensorRelease(bool isLeft) {
       leftReactionCalculated = true;
       leftFalseStart = true;
       falseStartOccurred = true;
-      setLeftLEDs(CRGB::Red);
+      if (!friendlyFalseStartsEnabled) setLeftLEDs(CRGB::Red);
     } else {
       rightReactionTime = negativeReactionTime;  // Store negative reaction time
       rightReactionCalculated = true;
       rightFalseStart = true;
       falseStartOccurred = true;
-      setRightLEDs(CRGB::Red);
+      if (!friendlyFalseStartsEnabled) setRightLEDs(CRGB::Red);
     }
     resetTimeoutActive = true;
     lastEventTime = millis();
@@ -517,7 +525,7 @@ void handleFootSensorRelease(bool isLeft) {
       if (reactionTime < FALSE_START_REACTION_TIME_CUTOFF) {  // False start < 100ms
         leftFalseStart = true;
         falseStartOccurred = true;
-        setLeftLEDs(CRGB::Red);
+        if (!friendlyFalseStartsEnabled) setLeftLEDs(CRGB::Red);
       }
     } else if (!isLeft && !rightReactionCalculated) {
       rightReactionTime = reactionTime;
@@ -526,7 +534,7 @@ void handleFootSensorRelease(bool isLeft) {
       if (reactionTime < FALSE_START_REACTION_TIME_CUTOFF) {  // False start < 100ms
         rightFalseStart = true;
         falseStartOccurred = true;
-        setRightLEDs(CRGB::Red);
+        if (!friendlyFalseStartsEnabled) setRightLEDs(CRGB::Red);
       }
     }
 
@@ -831,6 +839,8 @@ DynamicJsonDocument buildStatusJson() {
   doc["left_dnf"] = !leftFinished && !leftFalseStart && completionTimeLeft == 0 && (currentElapsedTime > 0 || resetTimeoutActive);
   doc["right_dnf"] = !rightFinished && !rightFalseStart && completionTimeRight == 0 && (currentElapsedTime > 0 || resetTimeoutActive);
 
+  doc["friendly_false_starts"] = friendlyFalseStartsEnabled;
+
   doc["uptime"] = millis();
 
   return doc;
@@ -929,6 +939,8 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
           handleDNF(true);  // true for left climber
         } else if (command == "dnf_right") {
           handleDNF(false); // false for right climber
+        } else if (command == "toggle_friendly_fs") {
+          friendlyFalseStartsEnabled = !friendlyFalseStartsEnabled;
         }
         sendWebSocketUpdate();
       }
@@ -1409,6 +1421,33 @@ void handleRoot() {
         box-shadow: 0 8px 25px rgba(255,255,255,0.3);
       }
 
+      .friendly-fs-toggle {
+        background: rgba(255,255,255,0.15);
+        border: 2px solid rgba(255,255,255,0.4);
+        padding: 12px 24px;
+        border-radius: 30px;
+        font-size: 14px;
+        font-weight: bold;
+        transition: all 0.4s ease;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+        width: 100%;
+        max-width: 240px;
+      }
+      .friendly-fs-toggle.enabled {
+        background: linear-gradient(135deg, #9C27B0, #CE93D8);
+        border-color: #7B1FA2;
+        box-shadow: 0 6px 20px rgba(156, 39, 176, 0.5);
+      }
+      .friendly-fs-toggle.disabled {
+        background: linear-gradient(135deg, #666, #888);
+        border-color: #555;
+        box-shadow: 0 6px 20px rgba(102, 102, 102, 0.3);
+      }
+      .friendly-fs-toggle:hover {
+        transform: translateY(-2px) scale(1.02);
+        box-shadow: 0 8px 25px rgba(255,255,255,0.3);
+      }
+
       .dnf-button {
         background: linear-gradient(135deg, rgba(220,38,38,0.3), rgba(185,28,28,0.4));
         border: 2px solid rgba(220,38,38,0.6);
@@ -1462,7 +1501,7 @@ void handleRoot() {
       }
       
       .timer-display {
-        font-size: 3.6em;
+        font-size: 2.8em;
         padding: 25px;
       }
       
@@ -1497,7 +1536,7 @@ void handleRoot() {
     
     @media (min-width: 1024px) {
       .timer-display {
-        font-size: 3.6em;
+        font-size: 3em;
       }
       
       h1 {
@@ -1603,6 +1642,7 @@ void handleRoot() {
         <button onclick='resetTimer()' id='resetBtn'>🔄 Reset</button>
         <button onclick='toggleMode()' id='modeBtn' class='mode-toggle competition-mode'>🏆 Competition Mode</button>
         <button onclick='toggleKidsMode()' id='kidsModeBtn' class='kids-mode-toggle disabled'>🤸 Blue Sensors: OFF</button>
+        <button onclick='toggleFriendlyFS()' id='friendlyFSBtn' class='friendly-fs-toggle disabled'>😊 Friendly False Starts: OFF</button>
         <button onclick='toggleHelp()' id='helpBtn' class='help-button'>❓ Help</button>
       </div>
       
@@ -1655,6 +1695,8 @@ void handleRoot() {
         helpBtn.textContent = '❓ Help';
       }
     }
+
+    function toggleFriendlyFS() { ws.send('toggle_friendly_fs'); }
 
     function markDNF(side) {
       if (confirm(`Mark ${side} climber as Did Not Finish?`)) {
@@ -2064,6 +2106,15 @@ void handleRoot() {
           kidsModeBtn.className = 'kids-mode-toggle disabled';
         }
         
+        const friendlyFSBtn = document.getElementById('friendlyFSBtn');
+        if(data.friendly_false_starts) {
+          friendlyFSBtn.textContent = 'Friendly False Starts: ON';
+          friendlyFSBtn.className = 'friendly-fs-toggle enabled';
+        } else {
+          friendlyFSBtn.textContent = 'Friendly False Starts: OFF';
+          friendlyFSBtn.className = 'friendly-fs-toggle disabled';
+        }
+
         const instructionsTitle = document.getElementById('instructions-title');
         const instructionsText = document.getElementById('instructions-text');
         if(data.single_player_mode) {
