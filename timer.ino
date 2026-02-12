@@ -241,10 +241,11 @@ void turnOffAllLEDs() {
 }
 
 void setLEDsBasedOnState(bool isLeft, bool falseStart, CRGB normalColor) {
+  bool showRed = falseStart && !friendlyFalseStartsEnabled;
   if (isLeft) {
-    setLeftLEDs(falseStart ? CRGB::Red : normalColor);
+    setLeftLEDs(showRed ? CRGB::Red : normalColor);
   } else {
-    setRightLEDs(falseStart ? CRGB::Red : normalColor);
+    setRightLEDs(showRed ? CRGB::Red : normalColor);
   }
 }
 
@@ -361,7 +362,11 @@ void completeAudioSequence() {
 
   if (falseStartOccurred && !falseStartAudioPlayed) {
     falseStartAudioPlayed = true;
-    startFalseStartSequence();
+    if (!friendlyFalseStartsEnabled) {
+      startFalseStartSequence();
+    } else {
+      completeFalseStartSequence();
+    }
   }
 
   sendWebSocketUpdate();
@@ -371,8 +376,8 @@ void completeFalseStartSequence() {
   isPlayingFalseStart = false;
   currentAudioStep = 0;
 
-  setLEDsBasedOnState(true, leftFalseStart, CRGB::Black);
-  setLEDsBasedOnState(false, rightFalseStart, CRGB::Black);
+  setLEDsBasedOnState(true, !friendlyFalseStartsEnabled && leftFalseStart, CRGB::Black);
+  setLEDsBasedOnState(false, !friendlyFalseStartsEnabled && rightFalseStart, CRGB::Black);
 
   resetTimeoutActive = true;
   lastEventTime = millis();
@@ -702,6 +707,7 @@ void determineWinner() {
     } else if (!rightFalseStart && leftFalseStart && rightDNF) {
       setRightLEDs(CRGB::Orange);
     }
+  }
 }
 
 void handleStopSensor(bool isLeft) {
