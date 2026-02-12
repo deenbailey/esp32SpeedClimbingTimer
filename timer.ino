@@ -292,23 +292,21 @@ void startFalseStartSequence() {
 void handleAudioLEDs(const AudioStep* sequence, int frequency) {
   if (isPlayingAudio) {
     if (frequency == 880 || frequency == 1760) {
-      setLEDsBasedOnState(true, leftFalseStart, CRGB::Green);
-      setLEDsBasedOnState(false, rightFalseStart, CRGB::Green);
+      setLEDsBasedOnState(true, !friendlyFalseStartsEnabled && leftFalseStart, CRGB::Green);
+      setLEDsBasedOnState(false, !friendlyFalseStartsEnabled && rightFalseStart, CRGB::Green);
     } else {
-      setLEDsBasedOnState(true, leftFalseStart, CRGB::Black);
-      setLEDsBasedOnState(false, rightFalseStart, CRGB::Black);
+      setLEDsBasedOnState(true, !friendlyFalseStartsEnabled && leftFalseStart, CRGB::Black);
+      setLEDsBasedOnState(false, !friendlyFalseStartsEnabled && rightFalseStart, CRGB::Black);
     }
   } else if (isPlayingFalseStart && !friendlyFalseStartsEnabled) {
-    if (!friendlyFalseStartsEnabled) {
-      if (frequency == 1568) {
-        if (leftFalseStart) setLeftLEDs(CRGB::Red);
-        if (rightFalseStart) setRightLEDs(CRGB::Red);
-        if (!leftFalseStart) setLeftLEDs(CRGB::Black);
-        if (!rightFalseStart) setRightLEDs(CRGB::Black);
-      } else {
-        if (leftFalseStart) setLeftLEDs(CRGB::Black);
-        if (rightFalseStart) setRightLEDs(CRGB::Black);
-      }
+    if (frequency == 1568) {
+      if (leftFalseStart) setLeftLEDs(CRGB::Red);
+      if (rightFalseStart) setRightLEDs(CRGB::Red);
+      if (!leftFalseStart) setLeftLEDs(CRGB::Black);
+      if (!rightFalseStart) setRightLEDs(CRGB::Black);
+    } else {
+      if (leftFalseStart) setLeftLEDs(CRGB::Black);
+      if (rightFalseStart) setRightLEDs(CRGB::Black);
     }
   }
 }
