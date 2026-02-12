@@ -697,14 +697,11 @@ void determineWinner() {
       setLeftLEDs(CRGB::Green);
     } else if (!rightFalseStart && leftFalseStart && rightFinished) {
       setRightLEDs(CRGB::Green);
-    }
-    // Handle DNF with false start
-    else if (!leftFalseStart && rightFalseStart && leftDNF) {
-      setLeftLEDs(CRGB::Orange); // DNF but no false start
+    } else if (!leftFalseStart && rightFalseStart && leftDNF) {
+      setLeftLEDs(CRGB::Orange);
     } else if (!rightFalseStart && leftFalseStart && rightDNF) {
-      setRightLEDs(CRGB::Orange); // DNF but no false start  
+      setRightLEDs(CRGB::Orange);
     }
-  }
 }
 
 void handleStopSensor(bool isLeft) {
