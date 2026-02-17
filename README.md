@@ -17,7 +17,7 @@ An ESP32 based timer for speed climbing competitions.
 
 ## ESP32 Arduino Core
 
-- **Version:** 3.3.6
+- **Version:** 3.3.0
 - **Repository:** [https://github.com/espressif/arduino-esp32](https://github.com/espressif/arduino-esp32)
 
 ---
